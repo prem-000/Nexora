@@ -1,0 +1,13 @@
+﻿stateDiagram-v2
+    [*] --> OriginCreated: Node Generates Alert
+    OriginCreated --> InCustody: Save to AlertCustodyStore
+    
+    InCustody --> Partitioned: No Direct Neighbors in Range
+    Partitioned --> InCustody: Periodic Liveness Sweep
+
+    InCustody --> NeighborConnected: New Neighbor Discovered
+    NeighborConnected --> Replicating: Check deliveredNeighbors Map
+    Replicating --> InCustody: Forward Alert & Add Neighbor to Delivered Set
+
+    InCustody --> Expired: TTL Expired (24 Hours)
+    Expired --> [*]: Purged from Custody Store

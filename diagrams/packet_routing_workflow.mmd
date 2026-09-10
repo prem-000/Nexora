@@ -1,0 +1,26 @@
+﻿sequenceDiagram
+    autonumber
+    participant Src as Source Node A
+    participant Relay as Relay Node B
+    participant Dest as Destination Node C
+
+    Src->>Src: Compose Message & Encrypt AES-256
+    Src->>Src: Check RouteTable for Dest
+    Src->>Relay: Transmit MeshMessage(dest=C, hopCount=0)
+
+    Note over Relay: Relay receives incoming packet
+    Relay->>Relay: Check DuplicateSuppressionCache(msgId)
+    Relay->>Relay: Validate hopCount (0 <= 3)
+    Relay->>Relay: Look up next hop for Node C
+
+    Relay->>Dest: Forward MeshMessage(dest=C, hopCount=1)
+
+    Note over Dest: Terminal Destination Reached
+    Dest->>Dest: Check DuplicateCache & Verify Not Duplicate
+    Dest->>Dest: Decrypt Payload using AES-256
+    Dest->>Dest: Display in Chat Thread & Store in DB
+
+    Dest->>Relay: Send ACK(originalMsgId, dest=A, hopCount=0)
+    Relay->>Src: Forward ACK(originalMsgId, dest=A, hopCount=1)
+
+    Note over Src: Src receives ACK -> Mark Message DELIVERED

@@ -1,0 +1,18 @@
+﻿sequenceDiagram
+    autonumber
+    participant Sender as Sending Node
+    participant Socket as TCP Socket (Port 8888)
+    participant Receiver as Receiving Node
+
+    Sender->>Sender: Select File via SAF Picker
+    Sender->>Receiver: Send FileMetadata (name, size, mimeType)
+    Receiver-->>Sender: Metadata Accepted & Ready for Stream
+
+    Sender->>Socket: Open BufferedOutputStream
+    Socket->>Receiver: Stream Binary Chunks (64KB buffer)
+    Note over Sender,Receiver: Real-time Transfer Progress Indicator
+
+    Socket-->>Receiver: EOF / Transfer Complete
+    Receiver->>Receiver: Verify File Integrity
+    Receiver->>Receiver: Save via AndroidX FileProvider
+    Receiver-->>Sender: Send FILE_TRANSFER_SUCCESS ACK

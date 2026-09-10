@@ -1,0 +1,32 @@
+﻿sequenceDiagram
+    autonumber
+    participant App as MainActivity
+    participant UserMgr as UserManager
+    participant DB as AppDatabase
+    participant Engine as RoutingEngine & MeshTransports
+    participant Watchdog as Heartbeat Watchdog
+
+    App->>App: onCreate() Initialized
+    App->>DB: setAllOffline() & clean stale alerts
+    App->>UserMgr: hasIdentity() Check
+    alt No Nickname Set
+        App->>App: Prompt Name Dialog & Save Nickname
+    else Identity Exists
+        UserMgr-->>App: Return Username
+    end
+
+    App->>Engine: Initialize Hybrid Mesh (Nearby + Wi-Fi Direct)
+    App->>Watchdog: Start Heartbeat Runnable (10s interval)
+
+    loop Every 10 Seconds
+        Watchdog->>Engine: Send Presence Heartbeat Beacon
+        Watchdog->>Engine: purgeExpiredRoutes() (35s TTL)
+        Watchdog->>DB: Update Offline States for Dropped Peers
+    end
+
+    Note over App: User Exits App or Swipes Away
+    App->>App: onDestroy() Triggered
+    App->>Watchdog: removeCallbacks(watchdogRunnable)
+    App->>Engine: resetRadio(forceStopAll=true)
+    App->>Engine: shutdown WifiP2pMeshManager
+    App->>DB: setAllOffline() in SQLite

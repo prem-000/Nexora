@@ -1,0 +1,34 @@
+﻿sequenceDiagram
+    autonumber
+    participant NodeA as Node A (Scanner)
+    participant Nearby as Google Nearby Connections
+    participant NodeB as Node B (Advertiser)
+
+    Note over NodeB: B starts advertising P2P_CLUSTER
+    NodeB->>Nearby: startAdvertising(serviceId, P2P_CLUSTER)
+    
+    Note over NodeA: A enters discovery phase
+    NodeA->>Nearby: startDiscovery(serviceId, P2P_CLUSTER)
+    Nearby-->>NodeA: onEndpointFound(endpointId, NodeB)
+
+    Note over NodeA: Node A requests link
+    NodeA->>Nearby: requestConnection(endpointId)
+    Nearby-->>NodeB: onConnectionInitiated(authDigits)
+    Nearby-->>NodeA: onConnectionInitiated(authDigits)
+
+    Note over NodeA,NodeB: Auto-accept matching authentication
+    NodeA->>Nearby: acceptConnection()
+    NodeB->>Nearby: acceptConnection()
+
+    Nearby-->>NodeA: onConnectionResult(STATUS_OK)
+    Nearby-->>NodeB: onConnectionResult(STATUS_OK)
+
+    Note over NodeA,NodeB: Direct Link Formed
+    NodeA->>NodeA: NeighborTable.updatePeer(NodeB, ROUTABLE)
+    NodeB->>NodeB: NeighborTable.updatePeer(NodeA, ROUTABLE)
+
+    Note over NodeA,NodeB: Synchronize Topology & Routes
+    NodeA->>NodeB: MeshMessage(TOPOLOGY_SYNC, NodeA CONNECTED, hop=1)
+    NodeB->>NodeA: MeshMessage(TOPOLOGY_SYNC, NodeB CONNECTED, hop=1)
+    NodeA->>NodeA: RouteTable.updateRoute(NodeB, hops=1, ttl=35s)
+    NodeB->>NodeB: RouteTable.updateRoute(NodeA, hops=1, ttl=35s)

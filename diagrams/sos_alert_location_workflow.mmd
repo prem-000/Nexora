@@ -1,0 +1,25 @@
+﻿sequenceDiagram
+    autonumber
+    participant User as Distress Node
+    participant GPS as Android LocationManager
+    participant Mesh as Mesh Engine
+    participant Rescuer as Rescuer Node
+
+    User->>GPS: Request High-Accuracy Coordinates
+    GPS-->>User: Lat, Lon, Accuracy
+    User->>User: Format Payload: [ALERT] id, title, coords
+    User->>User: Encrypt Payload via AES-256
+
+    User->>Mesh: Broadcast MeshMessage(BROADCAST_ALERT, hop=0)
+    Mesh->>Mesh: Store in AlertCustodyStore (DTN buffer)
+    Mesh->>Rescuer: Relay across Nearby and Wi-Fi Direct
+
+    Note over Rescuer: Rescuer receives emergency SOS
+    Rescuer->>Rescuer: Deduplicate via DuplicateSuppressionCache
+    Rescuer->>Rescuer: Decrypt AES-256 Payload
+    Rescuer->>Rescuer: Plot SOS Pin on Tactical Offline Map
+    Rescuer->>Rescuer: Trigger Visual Banner & Audible SOS Alarm
+
+    Note over Rescuer: Rescuer locates missing person
+    Rescuer->>User: Send Direct [FOUND_PERSON] with Rescuer GPS
+    User->>User: Update Alert Status to FOUND & Notify User
