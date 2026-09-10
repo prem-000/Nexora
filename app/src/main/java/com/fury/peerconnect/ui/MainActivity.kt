@@ -3389,9 +3389,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacks(heartbeatWatchdogRunnable)
         stopLiveLocationSharing(notifyPeer = false)
         offlineMapManager?.onDestroy()
-        resetRadio()
+        resetRadio(forceStopAll = true)
         wifiP2pMeshManager?.shutdown()
         p2pReceiver?.let {
             try {
@@ -3399,6 +3400,11 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {}
             p2pReceiver = null
         }
+        try {
+            runBlocking(Dispatchers.IO) {
+                db.peerDao().setAllOffline()
+            }
+        } catch (_: Exception) {}
     }
 
     companion object {
