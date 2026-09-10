@@ -1,32 +1,45 @@
-﻿sequenceDiagram
-    autonumber
-    participant App as MainActivity
-    participant UserMgr as UserManager
-    participant DB as AppDatabase
-    participant Engine as RoutingEngine & MeshTransports
-    participant Watchdog as Heartbeat Watchdog
+﻿flowchart TD
+    A[App Launch] --> B{Identity exists?}
+    
+    B -->|No| C[Setup or Login]
+    B -->|Yes| D[Load User Profile]
+    C --> D
+    
+    D --> E[Initialize Database]
+    E --> F[Start Mesh Engine]
 
-    App->>App: onCreate() Initialized
-    App->>DB: setAllOffline() & clean stale alerts
-    App->>UserMgr: hasIdentity() Check
-    alt No Nickname Set
-        App->>App: Prompt Name Dialog & Save Nickname
-    else Identity Exists
-        UserMgr-->>App: Return Username
+    F --> G[Fork Active Services]
+
+    subgraph Discovery_Loop [Discovery and Heartbeat Loop]
+        G --> H[Auto Discovery and Advertise]
+        H --> I{Peer Detected?}
+        I -->|Yes| J[P2P Connection Handshake]
+        I -->|No| K[10s Heartbeat Beacon]
+        J --> L[Exchange Route Topology]
+        L --> K
+        K --> M[Purge Expired Routes TTL 35s]
+        M --> H
     end
 
-    App->>Engine: Initialize Hybrid Mesh (Nearby + Wi-Fi Direct)
-    App->>Watchdog: Start Heartbeat Runnable (10s interval)
-
-    loop Every 10 Seconds
-        Watchdog->>Engine: Send Presence Heartbeat Beacon
-        Watchdog->>Engine: purgeExpiredRoutes() (35s TTL)
-        Watchdog->>DB: Update Offline States for Dropped Peers
+    subgraph Message_Handling [Message Alert and File Handling]
+        G --> N{Incoming Traffic}
+        N -->|Chat| O[AES-256 Direct Chat]
+        N -->|SOS| P[Broadcast SOS Alert]
+        N -->|File| Q[TCP Port 8888 Transfer]
+        O --> R[Persist in Room Database]
+        P --> R
+        Q --> R
     end
 
-    Note over App: User Exits App or Swipes Away
-    App->>App: onDestroy() Triggered
-    App->>Watchdog: removeCallbacks(watchdogRunnable)
-    App->>Engine: resetRadio(forceStopAll=true)
-    App->>Engine: shutdown WifiP2pMeshManager
-    App->>DB: setAllOffline() in SQLite
+    subgraph Offline_Recovery [Background and Offline Recovery]
+        R --> S{Network Partition?}
+        S -->|Yes| T[DTN Store and Forward Custody]
+        T --> U{Neighbor Reconnected?}
+        U -->|Yes| V[Replicate Stored Alerts]
+        V --> H
+        U -->|No| T
+        S -->|No| W{App Terminated?}
+        W -->|No| G
+        W -->|Yes| X[Stop Radios and Mark Offline]
+        X --> Y[App Teardown Complete]
+    end
