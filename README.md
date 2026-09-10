@@ -17,7 +17,7 @@ Comprehensive engineering guides and technical specifications are organized in t
 | 🏛️ **System Architecture** | [`docs/arch.md`](docs/arch.md) | C4 architecture diagrams, Room schemas, AES-256 encryption, and layers. |
 | 🛠️ **Engineering Workflow** | [`docs/workflow.md`](docs/workflow.md) | Gradle commands, APK generation, keystore signing, and ADB logcat telemetry. |
 | 🤝 **Contribution Guide** | [`docs/contribute.md`](docs/contribute.md) | Development setup, coding guidelines, branch strategy, and PR submission. |
-| 🔌 **Wire Compatibility** | [`WIRE_COMPAT.md`](WIRE_COMPAT.md) | Low-level payload wire framing and serialization specifications. |
+| 🔌 **Wire Compatibility** | [`docs/wire_compat.md`](docs/wire_compat.md) | Low-level payload wire framing and serialization specifications. |
 
 ---
 

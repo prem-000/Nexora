@@ -149,6 +149,10 @@ class MainActivity : AppCompatActivity() {
         Collections.synchronizedMap(LinkedHashMap())
     private val pendingCompletedFilesMap: MutableMap<Long, CompletedReceivedFile> =
         Collections.synchronizedMap(LinkedHashMap())
+    private val pendingBlobChunks = ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
+    private val handler = Handler(Looper.getMainLooper())
+    private val roleSwitchRunnable = Runnable { switchRoles() }
+    private var pendingRadioSwitch: Runnable? = null
     private val endpointLastSeen = ConcurrentHashMap<String, Long>()
     private val HEARTBEAT_INTERVAL_MS = 10000L
     private val HEARTBEAT_TIMEOUT_MS = 30000L
@@ -2607,7 +2611,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPeersFromDb() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val hasPhysicalNeighbors = activeEndpoints.isNotEmpty() || (::connectionManager.isInitialized && connectionManager.activeConnectionCount > 0)
+            val hasPhysicalNeighbors = activeEndpoints.isNotEmpty() || (::connectionManager.isInitialized && connectionManager.activeCount > 0)
             if (!hasPhysicalNeighbors) {
                 val staleOnline = db.peerDao().getAllPeers().filter { it.isOnline }
                 if (staleOnline.isNotEmpty()) {

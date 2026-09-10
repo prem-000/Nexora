@@ -1,14 +1,14 @@
-# NeXoRa Wire Protocol & Additive Compatibility Specification (WIRE_COMPAT)
+# NEXORA Wire Protocol & Additive Compatibility Specification (WIRE_COMPAT)
 
 > **Document Version:** 1.0.0  
-> **Status:** Ratified Standard for Location & Maps  
-> **Target Subsystems:** RoutingEngine, AlertCustodyStore, Chat Engine, Offline Maps Engine
+> **Status:** Ratified Standard for Location, Tactical Feeds & Attachments  
+> **Target Subsystems:** RoutingEngine, AlertCustodyStore, Chat Engine, Offline Maps Engine  
 
 ---
 
 ## 1. Principles of Additive Wire Compatibility
 
-To prevent breaking deployed nodes, mesh packet relaying, or delay-tolerant custody stores, all location features in NeXoRa adhere to strict non-negotiable rules:
+To prevent breaking deployed nodes, mesh packet relaying, or delay-tolerant custody stores, all location and messaging features in NEXORA adhere to strict non-negotiable rules:
 
 1. **Zero Changes to Transit Routing Logic:**  
    Mesh routers (`RoutingEngine`, `RouteTable`, `NearbyMeshTransport`, `WifiP2pMeshTransport`) operate exclusively on `MeshMessage` envelopes:
@@ -99,49 +99,25 @@ Emergency SOS and broadcasts with optional geo-tags.
   ```
 * **Compatible Extended Wire Format:**
   ```text
-  [ALERT]:<id>|<senderId>|<alertType>|<title>|<message>|<sentAt>|<attachmentPath>|<expiresAt>|<latitude>|<longitude>|<accuracy>
+  [ALERT]:<id>|<senderId>|<alertType>|<title>|<message>|<sentAt>|<attachmentPath>|<expiresAt>|<latitude>|<longitude>
   ```
-* **Compatibility Handling:**
-  - Older NeXoRa clients inspect `parts.size >= 8` and read `parts.last()` or `parts[7]` as `expiresAt`. If 11 parts are present, older clients treat extra parts as tail metadata or safely default `expiresAt` without crash.
-  - Newer clients inspect `parts.size >= 10`:
-    - `parts[7]` $\rightarrow$ `expiresAt`
-    - `parts[8]` $\rightarrow$ `latitude`
-    - `parts[9]` $\rightarrow$ `longitude`
-    - `parts.getOrNull(10)` $\rightarrow$ `accuracy` (optional)
+* **Parser Rule:**
+  Split by `|`. If `parts.size >= 10`, parse index 8 and 9 as Double latitude/longitude. If absent or invalid, treat alert as non-georeferenced.
 
 ---
 
-### 2.4. Missing Person Alert & "I Found This Person" Flow
+### 2.4. Found Person Coordination (`[FOUND_PERSON]:`)
+Specialized alert response protocol for search-and-rescue operations.
 
-1. **Broadcast Alert:**
-   - `alertType = "MISSING_PERSON"`
-   - Contains person description, last known photo attachment, and last known coordinates via Extended Alert Format.
-2. **Response Handshake (`[FOUND_PERSON]:`):**
-   - Sent directly from finder to alert origin node via `MessageType.DIRECT`.
-   ```text
-   [FOUND_PERSON]:<alertId>|<finderPeerId>|<message>|<timestamp>|<canShareLocation:true|false>
-   ```
-3. **Permission Request & Temporary Live Sharing:**
-   - Finder and Alert Sender establish a mutual temporary live session using `[LOC_LIVE]:` with explicit duration consent (15 min, 30 min, 1 hr, or Until Stopped).
-   - Neither party is tracked automatically; mutual opt-in is strictly enforced.
-
----
-
-## 3. Fallback & Network Partition Behavior
-
-* **Mesh Reachability:**
-  - If a direct neighbor or multi-hop path exists, live location updates arrive in real-time (~15–30s).
-  - If a network partition occurs, the receiver UI maintains the last known point with a status indicator:
-    `Last location • Last updated: 3 minutes ago`
-  - As soon as topological reachability is re-established via `TOPOLOGY_SYNC`, live updates seamlessly resume.
-
----
-
-## 4. Summary Table of Payload Prefixes
-
-| Wire Prefix | Transport Envelope | Relayed by Legacy Nodes? | Purpose |
-|---|---|---|---|
-| `[LOC]:` | `DIRECT` | **Yes** (opaque payload) | Point-in-time chat location pin |
-| `[LOC_LIVE]:` | `DIRECT` | **Yes** (opaque payload) | Throttled live-tracking coordinate stream |
-| `[ALERT]:` | `BROADCAST_ALERT` | **Yes** (controlled flooding) | SOS & broadcasts with optional lat/lng |
-| `[FOUND_PERSON]:` | `DIRECT` | **Yes** (opaque payload) | Response handshake for missing persons |
+* **Envelope Type:** `MessageType.DIRECT` or `MessageType.BROADCAST_ALERT`
+* **Wire Format (Decrypted):**
+  ```text
+  [FOUND_PERSON]:<alertId>|FOUND|<latitude>|<longitude>
+  ```
+* **Field Definitions:**
+  | Field | Type | Description | Example |
+  |---|---|---|---|
+  | `alertId` | String | ID of the missing person alert | `alert_92b4` |
+  | `status` | String | `FOUND` status indicator | `FOUND` |
+  | `latitude` | Double | Rescuer's current latitude (or 0 if unshared) | `37.774929` |
+  | `longitude` | Double | Rescuer's current longitude (or 0 if unshared) | `-122.419418` |
