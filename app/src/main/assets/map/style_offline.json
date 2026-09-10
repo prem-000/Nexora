@@ -1,0 +1,32 @@
+{
+  "version": 8,
+  "name": "NeXoRa Offline Map",
+  "sources": {
+    "raster-tiles": {
+      "type": "raster",
+      "tiles": [
+        "asset://map/tiles/{z}/{x}/{y}.png"
+      ],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 4,
+      "attribution": "© OpenStreetMap contributors, © CARTO"
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#111827"
+      }
+    },
+    {
+      "id": "raster-layer",
+      "type": "raster",
+      "source": "raster-tiles",
+      "minzoom": 0,
+      "maxzoom": 22
+    }
+  ]
+}

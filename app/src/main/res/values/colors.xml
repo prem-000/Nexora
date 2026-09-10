@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#ff000000</color>
+    <color name="white">#ffffffff</color>
+    <color name="ic_launcher_background">#ffffff</color>
+
+    <color name="nexora_bg">#f8f9fa</color>
+    <color name="nexora_border">#e5e7eb</color>
+    <color name="nexora_card_bg">#ffffff</color>
+    <color name="nexora_danger">#e53935</color>
+    <color name="nexora_dark_red">#b71c1c</color>
+    <color name="nexora_deep_red">#8e1515</color>
+    <color name="nexora_live">#16a34a</color>
+    <color name="nexora_green">#16a34a</color>
+    <color name="nexora_green_soft">#dcfce7</color>
+    <color name="nexora_offline">#9ca3af</color>
+    <color name="nexora_red">#e53935</color>
+    <color name="nexora_red_border">#fca5a5</color>
+    <color name="nexora_red_soft">#fef2f2</color>
+    <color name="nexora_surface">#ffffff</color>
+    <color name="nexora_text_muted">#9ca3af</color>
+    <color name="nexora_text_primary">#151515</color>
+    <color name="nexora_text_secondary">#6b7280</color>
+    <color name="nexora_violet">#e53935</color>
+    <color name="nexora_violet_light">#b71c1c</color>
+    <color name="nexora_violet_soft">#fef2f2</color>
+    <color name="nexora_warning">#f59e0b</color>
+    <color name="nexora_tick_read">#38bdf8</color>
+    <color name="nexora_tick_default">#ffcdd2</color>
+    <color name="nexora_cyan">#0284c7</color>
+</resources>

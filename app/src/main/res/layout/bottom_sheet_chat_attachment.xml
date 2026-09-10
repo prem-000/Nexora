@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_bottom_sheet_attachment"
+    android:orientation="vertical"
+    android:paddingTop="12dp"
+    android:paddingBottom="28dp"
+    android:paddingHorizontal="16dp">
+
+    <!-- Drag Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="12dp"
+        android:background="#64748B" />
+
+    <!-- Title Header -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="ATTACH TO CHAT"
+        android:textColor="@color/nexora_text_secondary"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="18dp" />
+
+    <!-- Row 1: Image, File, Location -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="3"
+        android:baselineAligned="false">
+
+        <!-- 1. Image / Gallery -->
+        <LinearLayout
+            android:id="@+id/actionAttachGallery"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:contentDescription="Attach Image from Gallery">
+
+            <FrameLayout
+                android:id="@+id/containerGalleryIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_gallery">
+
+                <ImageView
+                    android:id="@+id/iconGallery"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_image"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textGalleryLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Image"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 2. File / Document -->
+        <LinearLayout
+            android:id="@+id/actionAttachDocument"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:contentDescription="Attach Document or File">
+
+            <FrameLayout
+                android:id="@+id/containerDocumentIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_document">
+
+                <ImageView
+                    android:id="@+id/iconDocument"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_document"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textDocumentLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="File"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 3. Location -->
+        <LinearLayout
+            android:id="@+id/actionAttachLocation"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:contentDescription="Share Current Location">
+
+            <FrameLayout
+                android:id="@+id/containerLocationIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_location">
+
+                <ImageView
+                    android:id="@+id/iconLocation"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_attach_location"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textLocationLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Location"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Row 2: Live Location, Contact (hidden if not implemented), Camera -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="3"
+        android:baselineAligned="false">
+
+        <!-- 4. Live Location -->
+        <LinearLayout
+            android:id="@+id/actionAttachLiveLocation"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:contentDescription="Share Live GPS Location">
+
+            <FrameLayout
+                android:id="@+id/containerLiveLocationIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_live">
+
+                <ImageView
+                    android:id="@+id/iconLiveLocation"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_attach_live_location"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textLiveLocationLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Live Location"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 5. Contact (Hidden because not implemented) -->
+        <LinearLayout
+            android:id="@+id/actionAttachContact"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:visibility="gone"
+            android:contentDescription="Share Contact">
+
+            <FrameLayout
+                android:id="@+id/containerContactIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_contact">
+
+                <ImageView
+                    android:id="@+id/iconContact"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_contact"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textContactLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Contact"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 6. Camera -->
+        <LinearLayout
+            android:id="@+id/actionAttachCamera"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:contentDescription="Take Photo with Camera">
+
+            <FrameLayout
+                android:id="@+id/containerCameraIcon"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:duplicateParentState="true"
+                android:background="@drawable/bg_circle_attach_camera">
+
+                <ImageView
+                    android:id="@+id/iconCamera"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_camera"
+                    app:tint="#FFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/textCameraLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Camera"
+                android:textColor="@color/nexora_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>

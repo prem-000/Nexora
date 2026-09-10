@@ -1,0 +1,37 @@
+# Android Studio / Gradle
+*.iml
+.gradle/
+/local.properties
+.idea/
+.vscode/
+.navigation/
+.externalNativeBuild/
+.cxx/
+build/
+app/build/
+captures/
+
+# Artifacts & Packages
+*.apk
+*.ap_
+*.aab
+*.dex
+
+# Keystores & Signing
+*.keystore
+*.jks
+
+# Temporary decompilation and scratch folders
+decompiled_clean/
+decompiled_src/
+decompiled_src2/
+jadx.zip
+jadx_bin/
+scratch_dex/
+scratch_resolve/
+compile_errors.txt
+chat_adapter_dump.txt
+
+# OS Generated
+Thumbs.db
+.DS_Store
