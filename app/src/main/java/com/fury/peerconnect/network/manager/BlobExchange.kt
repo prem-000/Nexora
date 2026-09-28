@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class BlobExchange(
     val blobRepository: BlobRepository,
-    val myPeerId: String,
+    var myPeerId: String,
     val sendBlobRequest: (targetPeer: String?, hash: String) -> Unit,
     val sendBlobData: (targetPeer: String, hash: String, bytes: ByteArray) -> Unit,
     val onBlobObtained: (hash: String) -> Unit

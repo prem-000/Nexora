@@ -3,11 +3,12 @@ package com.fury.peerconnect.ui
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.fury.peerconnect.R
 import com.fury.peerconnect.data.PeerEntity
-import java.util.Locale
+import com.fury.peerconnect.logic.AvatarManager
 
 class ConnectedPeerAdapter(
     private val onPeerClick: (PeerEntity) -> Unit
@@ -37,13 +38,13 @@ class ConnectedPeerAdapter(
     override fun getItemCount(): Int = peers.size
 
     class ChipViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val avatarText: TextView = itemView.findViewById(R.id.chipPeerAvatar)
+        private val avatarImg: ImageView = itemView.findViewById(R.id.chipPeerAvatar)
         private val nameText: TextView = itemView.findViewById(R.id.chipPeerName)
         private val statusText: TextView = itemView.findViewById(R.id.chipStatusDot)
 
         fun bind(peer: PeerEntity) {
             nameText.text = peer.name
-            avatarText.text = peer.name.take(1).uppercase(Locale.ROOT)
+            AvatarManager.loadAvatar(avatarImg, peer.avatarId)
             statusText.text = if (peer.isOnline) "● Direct" else "● Mesh"
         }
     }

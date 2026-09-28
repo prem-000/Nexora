@@ -21,7 +21,10 @@ data class AlertEntity(
     val message: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val accuracy: Float? = null
+    val accuracy: Float? = null,
+    val category: String? = null,
+    val severity: String? = null,
+    val radiusMeters: Double? = null
 ) {
     val body: String
         get() = if (!message.isNullOrBlank()) message else description

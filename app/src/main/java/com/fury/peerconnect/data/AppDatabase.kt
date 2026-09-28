@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [PeerEntity::class, MessageEntity::class, AlertEntity::class], version = 9, exportSchema = false)
+@Database(entities = [PeerEntity::class, MessageEntity::class, AlertEntity::class], version = 12, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun peerDao(): PeerDao
     abstract fun messageDao(): MessageDao
@@ -67,6 +67,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE peers ADD COLUMN deviceId TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE alerts ADD COLUMN category TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE alerts ADD COLUMN severity TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE alerts ADD COLUMN radiusMeters REAL DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE peers ADD COLUMN avatarId TEXT DEFAULT 'avatar_01'")
+                db.execSQL("ALTER TABLE peers ADD COLUMN profileVersion INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE peers ADD COLUMN connectionStatus TEXT NOT NULL DEFAULT 'DISCOVERED'")
+                db.execSQL("ALTER TABLE peers ADD COLUMN isConnected INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE peers ADD COLUMN latitude REAL DEFAULT NULL")
+                db.execSQL("ALTER TABLE peers ADD COLUMN longitude REAL DEFAULT NULL")
+                db.execSQL("ALTER TABLE peers ADD COLUMN lastDistanceMeters REAL DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -74,7 +100,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "peer_connect_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

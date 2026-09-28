@@ -58,4 +58,13 @@ interface MessageDao {
 
     @Query("UPDATE messages SET transferStatus = :status WHERE id = :msgId")
     suspend fun updateTransferStatus(msgId: Long, status: String)
+
+    @Query("UPDATE messages SET senderId = :newName WHERE senderId = :oldName")
+    suspend fun migrateSenderName(oldName: String, newName: String): Int
+
+    @Query("UPDATE messages SET receiverId = :newName WHERE receiverId = :oldName")
+    suspend fun migrateReceiverName(oldName: String, newName: String): Int
+
+    @Query("SELECT COUNT(*) FROM messages WHERE alertId IS NULL AND (senderId != '' OR receiverId != '')")
+    suspend fun getDirectMessageCount(): Int
 }

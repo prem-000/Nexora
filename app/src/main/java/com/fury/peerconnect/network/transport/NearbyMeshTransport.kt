@@ -13,10 +13,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 class NearbyMeshTransport(
     private val context: Context,
-    val myPeerName: String
+    var myPeerName: String
 ) : MeshTransport {
     private val TAG = "NearbyMeshTransport"
     override val transportId: String = "NEARBY"
+
+    fun updateMyPeerName(newName: String) {
+        myPeerName = newName
+    }
 
     private val endpointToPeerName = ConcurrentHashMap<String, String>()
     private val peerNameToEndpoint = ConcurrentHashMap<String, String>()
@@ -88,6 +92,17 @@ class NearbyMeshTransport(
         }
     }
 
+    fun updatePeerMapping(endpointId: String, oldName: String, newName: String) {
+        peerNameToEndpoint.remove(oldName)
+        endpointToPeerName[endpointId] = newName
+        peerNameToEndpoint[newName] = endpointId
+        Log.d(TAG, "Updated peer mapping: $oldName -> $newName for endpoint $endpointId")
+        neighborStateListener?.invoke(NeighborEndpoint(newName, newName, transportId), true)
+    }
+
+    fun getEndpointForPeer(peerName: String): String? = peerNameToEndpoint[peerName]
+    fun getPeerForEndpoint(endpointId: String): String? = endpointToPeerName[endpointId]
+
     fun handleIncomingPayload(endpointId: String, payload: Payload): Boolean {
         if (payload.type != Payload.Type.BYTES) return false
         val bytes = payload.asBytes() ?: return false
@@ -110,7 +125,11 @@ class NearbyMeshTransport(
     }
 
     private fun resolveEndpointId(addressOrName: String): String? {
-        return if (endpointToPeerName.containsKey(addressOrName)) addressOrName else peerNameToEndpoint[addressOrName]
+        if (endpointToPeerName.containsKey(addressOrName)) return addressOrName
+        peerNameToEndpoint[addressOrName]?.let { return it }
+        endpointToPeerName.entries.firstOrNull { it.value.trim().equals(addressOrName.trim(), ignoreCase = true) }?.let { return it.key }
+        peerNameToEndpoint.entries.firstOrNull { it.key.trim().equals(addressOrName.trim(), ignoreCase = true) }?.let { return it.value }
+        return null
     }
 
     private fun serializePacket(packet: MeshMessage): ByteArray {

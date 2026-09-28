@@ -17,16 +17,15 @@
         android:padding="8dp"
         android:layout_width="match_parent"
         android:layout_height="match_parent">
-        <TextView
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/nexora_red"
-            android:gravity="center"
+        <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/chipPeerAvatar"
-            android:background="@drawable/bg_avatar_circle"
             android:layout_width="38dp"
             android:layout_height="38dp"
-            android:text="P"/>
+            android:background="@drawable/bg_avatar_circle"
+            android:padding="2dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="Chip Peer Avatar"
+            app:shapeAppearanceOverlay="@style/CircleImageView"/>
         <TextView
             android:textSize="12sp"
             android:textStyle="bold"

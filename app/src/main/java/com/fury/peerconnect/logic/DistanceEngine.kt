@@ -38,6 +38,60 @@ object DistanceEngine {
         return EARTH_RADIUS_METERS * c
     }
 
+    const val ACCURACY_THRESHOLD_METERS = 25.0f
+    const val PEER_STALE_TIMEOUT_MS = 10_000L
+    const val DEFAULT_EMA_ALPHA = 0.3
+
+    data class FilteredCoordinate(
+        val latitude: Double,
+        val longitude: Double,
+        val accuracy: Float,
+        val timestamp: Long
+    )
+
+    /**
+     * Exponential Moving Average (EMA) smoother for GPS coordinates.
+     * smoothed = alpha * new + (1.0 - alpha) * old
+     */
+    class CoordinateSmoother(private val alpha: Double = DEFAULT_EMA_ALPHA) {
+        private var smoothedLat: Double? = null
+        private var smoothedLon: Double? = null
+
+        @Synchronized
+        fun update(newLat: Double, newLon: Double, accuracy: Float, timestamp: Long): FilteredCoordinate {
+            val prevLat = smoothedLat
+            val prevLon = smoothedLon
+
+            val finalLat = if (prevLat != null) (alpha * newLat + (1.0 - alpha) * prevLat) else newLat
+            val finalLon = if (prevLon != null) (alpha * newLon + (1.0 - alpha) * prevLon) else newLon
+
+            smoothedLat = finalLat
+            smoothedLon = finalLon
+
+            return FilteredCoordinate(finalLat, finalLon, accuracy, timestamp)
+        }
+
+        @Synchronized
+        fun reset() {
+            smoothedLat = null
+            smoothedLon = null
+        }
+    }
+
+    /**
+     * Checks if a GPS fix has high-accuracy (<= 25m) suitable for tactical distance calculation.
+     */
+    fun isAccuracyAcceptable(accuracy: Float?): Boolean {
+        return accuracy != null && accuracy > 0f && accuracy <= ACCURACY_THRESHOLD_METERS
+    }
+
+    /**
+     * Checks if a peer's location fix is older than the staleness threshold (~10 seconds).
+     */
+    fun isFixStale(timestamp: Long, maxAgeMs: Long = PEER_STALE_TIMEOUT_MS): Boolean {
+        return (System.currentTimeMillis() - timestamp) > maxAgeMs
+    }
+
     /**
      * Formats distance into a human-readable string:
      * - Under 1000m: e.g. "450 m"

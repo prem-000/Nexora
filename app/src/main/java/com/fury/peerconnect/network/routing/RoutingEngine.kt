@@ -8,6 +8,7 @@ import com.fury.peerconnect.network.model.PeerStatus
 import com.fury.peerconnect.network.model.PresencePayload
 import com.fury.peerconnect.network.transport.MeshTransport
 import com.fury.peerconnect.network.transport.NeighborEndpoint
+import com.fury.peerconnect.network.model.WireEnvelope
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.ObjectInputStream
@@ -16,7 +17,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 class RoutingEngine(
-    val myDeviceId: String,
+    var myDeviceId: String,
     val connectionManager: ConnectionManager? = null,
     val onApplicationPayloadReceived: (sourcePeerId: String, messageId: String, type: MessageType, payload: ByteArray) -> Unit,
     val onAckReceived: (ackMessageId: String, originalMessageId: String, fromPeerId: String) -> Unit = { _, _, _ -> },
@@ -24,12 +25,41 @@ class RoutingEngine(
     val onReachabilityChanged: (peerName: String, isReachable: Boolean, nextHop: String?, hopDistance: Int) -> Unit = { _, _, _, _ -> },
     val onRouteDiscovered: (peerName: String) -> Unit = {}
 ) {
+    companion object {
+        const val CRITICAL_ALERT_MAX_HOPS = WireEnvelope.CRITICAL_ALERT_MAX_HOPS
+    }
+
     private val TAG = "RoutingEngine"
     val duplicateCache = DuplicateSuppressionCache(1000)
     val routeTable = RouteTable()
     val alertCustodyStore = AlertCustodyStore(100)
     private val transports = CopyOnWriteArrayList<MeshTransport>()
     internal val pendingUnicastCustody = CopyOnWriteArrayList<MeshMessage>()
+    val knownAliases = CopyOnWriteArrayList<String>()
+
+    fun updateMyDeviceId(newId: String, previousId: String? = null) {
+        if (previousId != null && previousId != newId && !knownAliases.contains(previousId)) {
+            knownAliases.add(previousId)
+        }
+        myDeviceId = newId
+    }
+
+    fun updatePeerDestination(oldPeerId: String, newPeerId: String) {
+        val existingRoute = routeTable.getRoute(oldPeerId)
+        if (existingRoute != null) {
+            routeTable.removeRoute(oldPeerId)
+            routeTable.updateRoute(
+                destinationPeerId = newPeerId,
+                nextHopAddress = existingRoute.nextHopAddress,
+                transportId = existingRoute.transportId,
+                hopCount = existingRoute.hopCount
+            )
+            onReachabilityChanged(oldPeerId, false, null, 0)
+            onReachabilityChanged(newPeerId, true, existingRoute.nextHopAddress, existingRoute.hopCount)
+            onRouteDiscovered(newPeerId)
+            flushPendingUnicast(newPeerId)
+        }
+    }
 
     fun registerTransport(transport: MeshTransport) {
         if (!transports.contains(transport)) {
@@ -95,17 +125,21 @@ class RoutingEngine(
             return
         }
 
-        if (message.hopCount > 3) {
-            Log.w(TAG, "Presence/Message ${message.messageId} exceeded hop limit (${message.hopCount} > 3). Dropping packet.")
+        if (message.hopCount > CRITICAL_ALERT_MAX_HOPS) {
+            Log.w(TAG, "Presence/Message ${message.messageId} exceeded hop limit (${message.hopCount} > $CRITICAL_ALERT_MAX_HOPS). Dropping packet.")
             return
         }
 
-        if (!isPeerAuthorized(message.sourcePeerId)) {
+        val wireEnvelope = if (message.type == MessageType.BROADCAST_ALERT) WireEnvelope.deserialize(message.payload) else null
+        val isWireEnvelope = wireEnvelope != null
+
+        val isDirectNeighbor = transports.any { t -> t.getConnectedNeighbors().any { n -> n.peerName.equals(message.sourcePeerId, ignoreCase = true) || n.neighborAddress.equals(message.sourcePeerId, ignoreCase = true) } } || (connectionManager?.getConnection(message.sourcePeerId) != null)
+        if (!isDirectNeighbor && !isWireEnvelope && !isPeerAuthorized(message.sourcePeerId)) {
             Log.w(TAG, "Message ${message.messageId} rejected: Originator ${message.sourcePeerId} is unauthorized.")
             return
         }
 
-        val isForMe = message.destinationPeerId == null || message.destinationPeerId == myDeviceId
+        val isForMe = message.destinationPeerId == null || message.destinationPeerId == myDeviceId || knownAliases.contains(message.destinationPeerId)
         if (isForMe) {
             when (message.type) {
                 MessageType.ACK -> {
@@ -117,8 +151,10 @@ class RoutingEngine(
                     processTopologySync(message, senderNeighborAddress, incomingTransportId)
                 }
                 MessageType.BROADCAST_ALERT -> {
-                    alertCustodyStore.storeAlert(message, message.sourcePeerId)
-                    alertCustodyStore.markDeliveredTo(message.messageId, senderNeighborAddress)
+                    if (!isWireEnvelope) {
+                        alertCustodyStore.storeAlert(message, message.sourcePeerId)
+                        alertCustodyStore.markDeliveredTo(message.messageId, senderNeighborAddress)
+                    }
                     onApplicationPayloadReceived(message.sourcePeerId, message.messageId, message.type, message.payload)
                 }
                 else -> {
@@ -127,8 +163,13 @@ class RoutingEngine(
             }
         }
 
+        if (isWireEnvelope) {
+            // Critical emergency WireEnvelope propagation and custody is orchestrated by CriticalAlertManager
+            return
+        }
+
         if (message.type == MessageType.BROADCAST_ALERT || message.type == MessageType.TOPOLOGY_SYNC || message.destinationPeerId == null) {
-            if (message.hopCount + 1 <= 3) {
+            if (message.hopCount + 1 <= CRITICAL_ALERT_MAX_HOPS) {
                 val forwarded = message.copy(hopCount = message.hopCount + 1)
                 Log.d(TAG, "Forwarding broadcast message ${message.messageId} (next hop=${forwarded.hopCount})")
                 broadcastAcrossTransports(forwarded, senderNeighborAddress, incomingTransportId)
@@ -209,11 +250,24 @@ class RoutingEngine(
         duplicateCache.markProcessed(message.messageId)
 
         val route = routeTable.getRoute(destinationPeerId)
+        val directTransport = if (route == null) {
+            transports.firstOrNull { t -> t.getConnectedNeighbors().any { n -> n.peerName.equals(destinationPeerId, ignoreCase = true) || n.neighborAddress.equals(destinationPeerId, ignoreCase = true) } }
+        } else null
+
         if (route != null) {
             val sent = sendViaTransport(route.transportId, route.nextHopAddress, message)
             if (!sent) {
                 Log.w(TAG, "Failed immediate send to ${route.nextHopAddress}. Adding to pending custody.")
                 pendingUnicastCustody.add(message)
+            }
+        } else if (directTransport != null) {
+            routeTable.updateRoute(destinationPeerId, destinationPeerId, directTransport.transportId, 1)
+            val sent = directTransport.send(message, destinationPeerId)
+            if (!sent) {
+                Log.w(TAG, "Failed direct transport send to $destinationPeerId. Adding to pending custody.")
+                pendingUnicastCustody.add(message)
+            } else {
+                Log.d(TAG, "Sent message $messageId directly to $destinationPeerId via ${directTransport.transportId}")
             }
         } else if (connectionManager?.getConnection(destinationPeerId) != null) {
             connectionManager.sendTo(destinationPeerId, message)
@@ -288,10 +342,21 @@ class RoutingEngine(
         duplicateCache.markProcessed(ackMessage.messageId)
 
         val route = routeTable.getRoute(targetPeerId)
+        val directTransport = if (route == null) {
+            transports.firstOrNull { t -> t.getConnectedNeighbors().any { n -> n.peerName.equals(targetPeerId, ignoreCase = true) || n.neighborAddress.equals(targetPeerId, ignoreCase = true) } }
+        } else null
+
         if (route != null) {
             val sent = sendViaTransport(route.transportId, route.nextHopAddress, ackMessage)
             if (!sent) {
                 Log.w(TAG, "Failed sending receipt to ${route.nextHopAddress}. Adding to pending custody.")
+                pendingUnicastCustody.add(ackMessage)
+            }
+        } else if (directTransport != null) {
+            routeTable.updateRoute(targetPeerId, targetPeerId, directTransport.transportId, 1)
+            val sent = directTransport.send(ackMessage, targetPeerId)
+            if (!sent) {
+                Log.w(TAG, "Failed sending receipt via direct transport to $targetPeerId. Adding to pending custody.")
                 pendingUnicastCustody.add(ackMessage)
             }
         } else if (connectionManager?.getConnection(targetPeerId) != null) {
@@ -305,6 +370,14 @@ class RoutingEngine(
 
     fun sendAck(targetPeerId: String, originalMessageId: String) {
         sendReceipt(targetPeerId, originalMessageId, "DELIVERED")
+    }
+
+    fun broadcastAcrossAllTransports(
+        message: MeshMessage,
+        excludeAddress: String? = null,
+        excludeTransportId: String? = null
+    ) {
+        broadcastAcrossTransports(message, excludeAddress, excludeTransportId)
     }
 
     private fun broadcastAcrossTransports(

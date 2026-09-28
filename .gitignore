@@ -31,6 +31,8 @@ scratch_dex/
 scratch_resolve/
 compile_errors.txt
 chat_adapter_dump.txt
+avatar_icons/
+svg/
 
 # OS Generated
 Thumbs.db

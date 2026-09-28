@@ -28,16 +28,18 @@ object MeshBlobStore {
     }
 
     fun has(blobDir: File, hash: String): Boolean {
-        if (hash.isBlank()) return false
-        val file = File(blobDir, "${hash.lowercase()}.blob")
+        val clean = hash.trim().lowercase()
+        if (clean.isBlank()) return false
+        val file = File(blobDir, "$clean.blob")
         return file.exists() && file.length() > 0L
     }
 
     fun has(context: Context, hash: String): Boolean = has(getBlobDir(context), hash)
 
     fun getFile(blobDir: File, hash: String): File? {
-        if (!has(blobDir, hash)) return null
-        return File(blobDir, "${hash.lowercase()}.blob")
+        val clean = hash.trim().lowercase()
+        if (!has(blobDir, clean)) return null
+        return File(blobDir, "$clean.blob")
     }
 
     fun getFile(context: Context, hash: String): File? = getFile(getBlobDir(context), hash)
@@ -63,14 +65,12 @@ object MeshBlobStore {
 
     fun saveIncoming(blobDir: File, expectedHash: String, incomingFile: File): Boolean {
         val cleanExpected = expectedHash.trim().lowercase()
+        if (!incomingFile.exists() || incomingFile.length() == 0L) return false
         val actualHash = computeSha256(incomingFile).lowercase()
         log(TAG, "ATTACHMENT_HASH_VERIFY: expected=$cleanExpected, actual=$actualHash")
 
         if (cleanExpected.isNotEmpty() && actualHash != cleanExpected) {
-            log(TAG, "ATTACHMENT_HASH_MISMATCH: expected $cleanExpected but got $actualHash. Deleting temp file.")
-            if (incomingFile.exists()) {
-                incomingFile.delete()
-            }
+            log(TAG, "ATTACHMENT_HASH_MISMATCH: expected $cleanExpected but got $actualHash.")
             return false
         }
 
@@ -78,15 +78,19 @@ object MeshBlobStore {
         if (!blobDir.exists()) blobDir.mkdirs()
         val destinationFile = File(blobDir, "$finalHash.blob")
 
+        // Idempotent: If destination file already exists and matches hash, avoid unnecessary re-write
+        if (destinationFile.exists() && destinationFile.length() == incomingFile.length()) {
+            if (cleanExpected.isEmpty() || computeSha256(destinationFile).equals(cleanExpected, ignoreCase = true)) {
+                log(TAG, "ATTACHMENT_ALREADY_STORED: hash=$finalHash, bytes=${destinationFile.length()}")
+                return true
+            }
+        }
+
         return try {
             if (destinationFile.exists()) {
                 destinationFile.delete()
             }
-            val moved = incomingFile.renameTo(destinationFile)
-            if (!moved) {
-                incomingFile.copyTo(destinationFile, overwrite = true)
-                incomingFile.delete()
-            }
+            incomingFile.copyTo(destinationFile, overwrite = true)
             if (destinationFile.exists() && destinationFile.length() > 0L) {
                 log(TAG, "ATTACHMENT_SAVE_SUCCESS: hash=$finalHash, bytes=${destinationFile.length()}")
                 true
@@ -95,7 +99,7 @@ object MeshBlobStore {
                 false
             }
         } catch (e: Exception) {
-            log(TAG, "Error moving incoming file to blob store", e)
+            log(TAG, "Error copying incoming file to blob store", e)
             if (destinationFile.exists()) destinationFile.delete()
             false
         }
@@ -118,6 +122,15 @@ object MeshBlobStore {
         val finalHash = if (cleanExpected.isNotEmpty()) cleanExpected else actualHash
         if (!blobDir.exists()) blobDir.mkdirs()
         val destinationFile = File(blobDir, "$finalHash.blob")
+
+        // Idempotent: If destination file already exists and matches hash, return true
+        if (destinationFile.exists() && destinationFile.length() == bytes.size.toLong()) {
+            if (cleanExpected.isEmpty() || computeSha256(destinationFile).equals(cleanExpected, ignoreCase = true)) {
+                log(TAG, "ATTACHMENT_ALREADY_STORED: hash=$finalHash, bytes=${destinationFile.length()}")
+                return true
+            }
+        }
+
         return try {
             FileOutputStream(destinationFile).use { fos ->
                 fos.write(bytes)
@@ -140,14 +153,15 @@ object MeshBlobStore {
         saveDirectBytes(getBlobDir(context), expectedHash, bytes)
 
     fun exportReadableFile(blobDir: File, cacheDir: File, hash: String, originalFileName: String, attachmentKey: String?): File? {
-        val blobFile = getFile(blobDir, hash) ?: return null
+        val cleanHash = hash.trim().lowercase()
+        val blobFile = getFile(blobDir, cleanHash) ?: return null
         val attachDir = File(cacheDir, "attachments").apply { if (!exists()) mkdirs() }
         var cleanName = Regex("[^a-zA-Z0-9._-]").replace(originalFileName, "_")
         if (cleanName.isEmpty()) cleanName = "attachment"
-        val exportFile = File(attachDir, "${hash.take(8)}_$cleanName")
+        val exportFile = File(attachDir, "${cleanHash.take(8)}_$cleanName")
 
         return try {
-            if (!attachmentKey.isNullOrBlank()) {
+            if (!attachmentKey.isNullOrBlank() && attachmentKey != "null") {
                 val cipherBytes = blobFile.readBytes()
                 val plainBytes = SecurityHelper.decryptBytes(cipherBytes, attachmentKey)
                 FileOutputStream(exportFile).use { fos ->

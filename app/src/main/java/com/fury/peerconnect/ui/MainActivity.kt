@@ -22,6 +22,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.MimeTypeMap
+import android.webkit.WebView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -62,6 +63,7 @@ import com.fury.peerconnect.logic.FileStorageManager
 import com.fury.peerconnect.logic.MeshBlobStore
 import com.fury.peerconnect.logic.SecurityHelper
 import com.fury.peerconnect.logic.UserManager
+import com.fury.peerconnect.logic.AvatarManager
 import com.fury.peerconnect.network.manager.BlobExchange
 import com.fury.peerconnect.network.manager.ConnectionManager
 import com.fury.peerconnect.network.manager.NeighborTable
@@ -76,6 +78,13 @@ import com.fury.peerconnect.network.routing.DuplicateSuppressionCache
 import com.fury.peerconnect.network.routing.RoutingEngine
 import com.fury.peerconnect.network.transport.NearbyMeshTransport
 import com.fury.peerconnect.network.transport.WifiP2pMeshTransport
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import com.fury.peerconnect.logic.CriticalAlertManager
+import com.fury.peerconnect.network.model.EmergencyCategory
+import com.fury.peerconnect.network.model.WireEnvelope
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.ResolvableApiException
 import com.google.android.gms.location.LocationRequest
@@ -102,6 +111,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -124,6 +134,7 @@ class MainActivity : AppCompatActivity() {
         val fileName: String,
         val senderName: String,
         val endpointId: String,
+        val hash: String = "",
         val timestamp: Long = System.currentTimeMillis()
     )
 
@@ -150,6 +161,7 @@ class MainActivity : AppCompatActivity() {
     private val pendingCompletedFilesMap: MutableMap<Long, CompletedReceivedFile> =
         Collections.synchronizedMap(LinkedHashMap())
     private val pendingBlobChunks = ConcurrentHashMap<String, MutableMap<Int, ByteArray>>()
+    private val completedBlobHashes = ConcurrentHashMap.newKeySet<String>()
     private val handler = Handler(Looper.getMainLooper())
     private val roleSwitchRunnable = Runnable { switchRoles() }
     private var pendingRadioSwitch: Runnable? = null
@@ -188,6 +200,8 @@ class MainActivity : AppCompatActivity() {
     private var p2pReceiver: WifiP2pBroadcastReceiver? = null
     private var nearbyMeshTransport: NearbyMeshTransport? = null
     private var wifiP2pMeshTransport: WifiP2pMeshTransport? = null
+    private var criticalAlertManager: CriticalAlertManager? = null
+    private lateinit var userManager: UserManager
 
     private lateinit var peerAdapter: PeerAdapter
     private lateinit var chatAdapter: ChatAdapter
@@ -203,12 +217,18 @@ class MainActivity : AppCompatActivity() {
     private var activeLiveSharingDurationMillis: Long = 0L
     private var liveSharingStartTime: Long = 0L
 
+    private val mapRoutingEngine = com.fury.peerconnect.logic.routing.OnlineRoutingEngine()
     private lateinit var dashMapView: org.maplibre.android.maps.MapView
     private lateinit var dashMapCoordinatesText: TextView
     private lateinit var mapStatusText: TextView
     private lateinit var mapDistanceMeasureText: TextView
     private lateinit var btnMapRecenter: View
     private lateinit var btnMapLayers: View
+    private lateinit var btnMapDownloadArea: View
+    private lateinit var mapCachingIndicator: View
+    private lateinit var btnMapTypeStreet: TextView
+    private lateinit var btnMapTypeSat: TextView
+    private lateinit var btnMapTypeHybrid: TextView
 
     private lateinit var statusText: TextView
     private lateinit var chatStatusText: TextView
@@ -236,7 +256,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chipAlertAll: View
     private lateinit var chipAlertGroups: View
     private lateinit var chipAlertSystem: View
+    private lateinit var chipAlertCritical: View
+    private var imgEmptyAlerts: ImageView? = null
+    private var textEmptyAlertsTitle: TextView? = null
+    private var textEmptyAlertsSubtitle: TextView? = null
     private lateinit var layoutAlertThread: ConstraintLayout
+    private lateinit var alertThreadOriginalCard: MaterialCardView
     private lateinit var alertThreadHeader: TextView
     private lateinit var alertThreadSenderText: TextView
     private lateinit var btnExitAlertThread: View
@@ -257,19 +282,64 @@ class MainActivity : AppCompatActivity() {
     private var pendingAlertAttachmentName: String? = null
     private var pendingAlertFileNameText: TextView? = null
 
-    private lateinit var settingsAvatar: TextView
+    private lateinit var settingsAvatar: ImageView
     private lateinit var settingsDisplayName: TextView
     private lateinit var settingsPeerId: TextView
     private lateinit var settingsStatusBadge: TextView
     private lateinit var btnEditIdentity: View
+    private lateinit var cardConnections: View
+    private lateinit var textConnectionsSubtitle: TextView
+    private lateinit var btnViewConnections: View
+    private lateinit var layoutConnections: View
+    private lateinit var btnExitConnections: View
+    private lateinit var textHeaderRequests: TextView
+    private lateinit var recyclerConnectionRequests: RecyclerView
+    private lateinit var textHeaderConnections: TextView
+    private lateinit var recyclerConnectedPeers: RecyclerView
+    private lateinit var textEmptyConnections: TextView
+    private lateinit var connectedPeersListAdapter: ConnectedPeersAdapter
+    private lateinit var connectionRequestsAdapter: ConnectionRequestsAdapter
+    private val cachedPeerAvatars = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private lateinit var messagesEmptyStateContainer: View
+    private lateinit var messagesEmptyIllustration: WebView
     private lateinit var messagesEmptyText: TextView
     private lateinit var peersRecyclerView: RecyclerView
     private lateinit var chatRecyclerView: RecyclerView
-    private lateinit var chatPeerAvatar: TextView
+    private lateinit var chatPeerAvatar: ImageView
     private lateinit var editMessage: EditText
     private lateinit var btnSend: View
     private lateinit var btnAttach: View
     private lateinit var btnExitChat: View
+    private lateinit var btnConnectChat: com.google.android.material.button.MaterialButton
+    private var pendingDirectConnectPeer: String? = null
+
+    // Peer Profile Screen (WhatsApp Contact Info style)
+    private lateinit var layoutPeerProfile: View
+    private lateinit var peerProfileAppBar: MaterialCardView
+    private lateinit var btnExitPeerProfile: ImageView
+    private lateinit var peerProfileTopTitle: TextView
+    private lateinit var peerProfileTopSubtitle: TextView
+    private lateinit var peerProfileAvatar: ImageView
+    private lateinit var peerProfileName: TextView
+    private lateinit var peerProfileStatusBadge: TextView
+    private lateinit var btnPeerMessage: com.google.android.material.button.MaterialButton
+    private lateinit var btnPeerConnect: com.google.android.material.button.MaterialButton
+    private lateinit var layoutPeerRequestActions: View
+    private lateinit var btnPeerAccept: View
+    private lateinit var btnPeerDecline: View
+    private lateinit var peerProfileDeviceId: TextView
+    private lateinit var peerProfileVersion: TextView
+    private lateinit var peerProfileConnStatus: TextView
+    private lateinit var peerProfileDistance: TextView
+    private lateinit var peerProfileLocationDetails: TextView
+    private lateinit var peerProfileRoute: TextView
+    private lateinit var peerProfileLastSeen: TextView
+    private lateinit var peerProfileMediaCount: TextView
+    private lateinit var recyclerPeerSharedMedia: RecyclerView
+    private lateinit var textEmptySharedMedia: TextView
+    private lateinit var peerSharedMediaAdapter: PeerSharedMediaAdapter
+    private var currentProfilePeerName: String? = null
 
     private var isActivityResumed = false
     private val unreadMessageCounts: MutableMap<String, Int> = Collections.synchronizedMap(mutableMapOf())
@@ -299,6 +369,8 @@ class MainActivity : AppCompatActivity() {
             (findViewById<View>(R.id.mainHeaderCard) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
             (findViewById<View>(R.id.appBarCard) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
             (findViewById<View>(R.id.alertThreadAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
+            (findViewById<View>(R.id.connAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
+            (findViewById<View>(R.id.peerProfileAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
         } catch (e: Exception) {
             Log.e(TAG, "Error applying top insets", e)
         }
@@ -307,7 +379,11 @@ class MainActivity : AppCompatActivity() {
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             try {
-                if (::layoutAlertThread.isInitialized && layoutAlertThread.visibility == View.VISIBLE) {
+                if (::layoutPeerProfile.isInitialized && layoutPeerProfile.visibility == View.VISIBLE) {
+                    closePeerProfile()
+                } else if (::layoutConnections.isInitialized && layoutConnections.visibility == View.VISIBLE) {
+                    layoutConnections.visibility = View.GONE
+                } else if (::layoutAlertThread.isInitialized && layoutAlertThread.visibility == View.VISIBLE) {
                     closeAlertThread()
                 } else if (::layoutChat.isInitialized && layoutChat.visibility == View.VISIBLE) {
                     closeChat()
@@ -333,11 +409,15 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.NEARBY_WIFI_DEVICES,
             Manifest.permission.POST_NOTIFICATIONS
         )
-    } else if (Build.VERSION.SDK_INT >= 29) {
+    } else if (Build.VERSION.SDK_INT >= 31) {
         arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_ADVERTISE,
             Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
+    } else if (Build.VERSION.SDK_INT >= 29) {
+        arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION
         )
     } else {
@@ -416,12 +496,21 @@ class MainActivity : AppCompatActivity() {
             val foundName = info.endpointName
             val ts = System.currentTimeMillis()
             Log.d(TAG, "[DISCOVERY_FOUND] ts=$ts endpointId=$endpointId foundName='$foundName' myNick='$myNickName'")
+            discoveredEndpoints[endpointId] = foundName
             lifecycleScope.launch(Dispatchers.IO) {
                 val isKnown = db.peerDao().isKnownPeer(foundName)
+                val isPendingDirect = (pendingDirectConnectPeer != null && pendingDirectConnectPeer == foundName)
                 withContext(Dispatchers.Main) {
+                    if (isPendingDirect) {
+                        pendingDirectConnectPeer = null
+                        Toast.makeText(this@MainActivity, "Connecting to $foundName...", Toast.LENGTH_SHORT).show()
+                        Nearby.getConnectionsClient(this@MainActivity)
+                            .requestConnection(myNickName, endpointId, connectionLifecycleCallback)
+                        handler.removeCallbacks(roleSwitchRunnable)
+                        return@withContext
+                    }
                     if (!isKnown) {
-                        if (isPairingMode && !discoveredEndpoints.containsKey(endpointId)) {
-                            discoveredEndpoints[endpointId] = foundName
+                        if (isPairingMode) {
                             showDeviceSelectionDialog()
                         }
                     } else {
@@ -452,8 +541,8 @@ class MainActivity : AppCompatActivity() {
 
         override fun onEndpointLost(endpointId: String) {
             Log.d(TAG, "[DISCOVERY_LOST] endpointId=$endpointId")
+            discoveredEndpoints.remove(endpointId)
             if (isPairingMode) {
-                discoveredEndpoints.remove(endpointId)
                 showDeviceSelectionDialog()
             }
         }
@@ -477,11 +566,11 @@ class MainActivity : AppCompatActivity() {
 
             lifecycleScope.launch(Dispatchers.IO) {
                 val isKnown = db.peerDao().isKnownPeer(incomingName)
-                if (isKnown || isPairingMode) {
+                if (isKnown || isPairingMode || pendingDirectConnectPeer != null) {
                     handler.removeCallbacks(roleSwitchRunnable)
                 } else {
-                    Log.w(TAG, "[CONN_REJECT_UNKNOWN] Rejecting $endpointId ($incomingName)")
-                    Nearby.getConnectionsClient(this@MainActivity).disconnectFromEndpoint(endpointId)
+                    Log.d(TAG, "[CONN_ACCEPT_HANDSHAKE] Accepting $endpointId ($incomingName) to exchange PEER_HELLO handshake")
+                    handler.removeCallbacks(roleSwitchRunnable)
                 }
             }
         }
@@ -510,7 +599,21 @@ class MainActivity : AppCompatActivity() {
 
                 nearbyMeshTransport?.onEndpointConnected(endpointId, peerName)
 
+                // Send PEER_HELLO handshake with our persistent device ID, nickname, avatar, and profile version
+                val userMgr = UserManager(this@MainActivity)
+                val myDevId = userMgr.getDeviceId()
+                val myAvatar = userMgr.getAvatarId()
+                val myVer = userMgr.getProfileVersion()
+                val helloMsg = ChatMessage(myNickName, SecurityHelper.encrypt("[PEER_HELLO]:$myDevId|$myNickName|$myAvatar|$myVer"), System.currentTimeMillis())
+                try {
+                    val helloBytes = serialize(helloMsg)
+                    routingEngine?.sendDirectMessage(peerName, helloBytes)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending PEER_HELLO", e)
+                }
+
                 lifecycleScope.launch(Dispatchers.IO) {
+                    val existing = db.peerDao().getPeerByName(peerName)
                     db.peerDao().insertPeer(
                         PeerEntity(
                             name = peerName,
@@ -519,21 +622,27 @@ class MainActivity : AppCompatActivity() {
                             isOnline = true,
                             nextHop = peerName,
                             hopDistance = 1,
-                            isReachable = true
+                            isReachable = true,
+                            deviceId = existing?.deviceId ?: "",
+                            avatarId = existing?.avatarId ?: AvatarManager.DEFAULT_AVATAR_ID,
+                            profileVersion = existing?.profileVersion ?: 1L,
+                            connectionStatus = existing?.connectionStatus ?: "NONE",
+                            isConnected = existing?.isConnected ?: false,
+                            latitude = existing?.latitude,
+                            longitude = existing?.longitude,
+                            lastDistanceMeters = existing?.lastDistanceMeters
                         )
                     )
                     emitAlert("CONNECTION", "CONNECTED", "$peerName is now connected", peerName)
                     broadcastPresenceUpdate(peerName, PeerStatus.CONNECTED)
-                    val updatedPeers = db.peerDao().getAllPeers()
                     withContext(Dispatchers.Main) {
-                        peerAdapter.updateList(updatedPeers)
-                        connectedPeerAdapter.setPeers(updatedPeers.filter { it.isOnline || it.isReachable })
-                        dashActiveCount.text = updatedPeers.count { it.isOnline }.toString()
-                        dashKnownCount.text = updatedPeers.size.toString()
-                        dashOfflineCount.text = updatedPeers.count { !it.isOnline && !it.isReachable }.toString()
+                        loadPeersFromDb()
                         if (currentChatPeerName == peerName) {
                             focusedChatEndpointId = endpointId
                             updateStatus("CONNECTED")
+                            chatStatusText.text = "● Connected"
+                            chatStatusText.setTextColor(Color.parseColor("#16A34A"))
+                            btnConnectChat.visibility = View.GONE
                         }
                     }
                     flushOfflineMessages(peerName)
@@ -587,6 +696,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            endpointLastSeen[endpointId] = System.currentTimeMillis()
             if (update.status == PayloadTransferUpdate.Status.IN_PROGRESS) {
                 if (update.totalBytes > 0) {
                     val progress = (update.bytesTransferred.toFloat() / update.totalBytes.toFloat()) * 100f
@@ -626,23 +736,36 @@ class MainActivity : AppCompatActivity() {
                             Log.d(TAG, "ATTACHMENT_HASH_VERIFY: hash=$hash bytes=$length file=$fileName")
                             MeshBlobStore.saveIncoming(this@MainActivity, hash, savedFile)
                             pendingCompletedFilesMap[update.payloadId] = CompletedReceivedFile(endpointId, savedFile, hash)
+                            FileStorageManager.saveToPublicDownloads(this@MainActivity, savedFile, fileName)
 
                             val sender = pendingMeta?.senderName ?: endpointId
                             blobExchange?.onReceived(hash, savedFile, sender)
 
+                            val strDetails = "[FILE]:$fileName|$absolutePath|$hash|$length|SUCCESS"
                             if (pendingMeta?.messageId != null) {
-                                val strDetails = "[FILE]:$fileName|$absolutePath|$hash|$length|SUCCESS"
                                 db.messageDao().updateFileDetails(pendingMeta.messageId, strDetails, absolutePath, "SUCCESS", length)
                                 Log.d(TAG, "ATTACHMENT_MESSAGE_UPDATED: id=${pendingMeta.messageId} hash=$hash")
                                 emitAlert("TRANSFER", "TRANSFER COMPLETE", "$fileName received successfully", pendingMeta.senderName)
-                                withContext(Dispatchers.Main) {
-                                    if (currentChatPeerName == pendingMeta.senderName) {
-                                        val history = db.messageDao().getChatHistory(myNickName, pendingMeta.senderName)
-                                        updateChatUI(history)
-                                    }
+                            } else {
+                                // Fallback: update any pending RECEIVING message with matching hash or filename
+                                val receivingMsgs = db.messageDao().getAllFileMessages().filter {
+                                    it.transferStatus == "RECEIVING" && (
+                                        (hash.isNotBlank() && it.text.contains(hash)) || it.fileName == fileName
+                                    )
                                 }
-                            } else if (pendingMeta?.alertId != null) {
-                                val strDetails = "[FILE]:$fileName|$absolutePath|$hash|$length|SUCCESS"
+                                for (rMsg in receivingMsgs) {
+                                    db.messageDao().updateFileDetails(rMsg.id.toLong(), strDetails, absolutePath, "SUCCESS", length)
+                                    Log.d(TAG, "ATTACHMENT_FALLBACK_UPDATED: id=${rMsg.id} hash=$hash")
+                                }
+                            }
+                            withContext(Dispatchers.Main) {
+                                val peerToRefresh = pendingMeta?.senderName ?: currentChatPeerName
+                                if (peerToRefresh != null && currentChatPeerName == peerToRefresh) {
+                                    val history = db.messageDao().getChatHistory(myNickName, peerToRefresh)
+                                    updateChatUI(history)
+                                }
+                            }
+                            if (pendingMeta?.alertId != null) {
                                 val existingAlert = db.alertDao().getAlertByAlertId(pendingMeta.alertId)
                                 if (existingAlert != null) {
                                     db.alertDao().updateAlert(existingAlert.copy(attachmentPath = strDetails))
@@ -655,6 +778,13 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             if (pendingMeta?.messageId != null) {
                                 db.messageDao().updateTransferStatus(pendingMeta.messageId, "FAILED")
+                                withContext(Dispatchers.Main) {
+                                    val peerToRefresh = pendingMeta.senderName
+                                    if (currentChatPeerName == peerToRefresh) {
+                                        val history = db.messageDao().getChatHistory(myNickName, peerToRefresh)
+                                        updateChatUI(history)
+                                    }
+                                }
                             }
                         }
                     }
@@ -664,13 +794,25 @@ class MainActivity : AppCompatActivity() {
                 val pendingMeta = pendingFileMetadataMap.remove(update.payloadId)
                 incomingFilePayloads.remove(update.payloadId)
                 if (pendingMeta?.messageId != null) {
+                    val mId = pendingMeta.messageId
                     lifecycleScope.launch(Dispatchers.IO) {
-                        db.messageDao().updateTransferStatus(pendingMeta.messageId, "FAILED")
+                        db.messageDao().updateTransferStatus(mId, "FAILED")
+                        val msg = db.messageDao().getMessageById(mId)
+                        val failedText = msg?.text?.replace("|RECEIVING", "|FAILED") ?: ""
+                        if (failedText.isNotBlank()) {
+                            db.messageDao().updateFileDetails(mId, failedText, msg?.localPath ?: "", "FAILED", msg?.fileSize ?: 0L)
+                        }
                         withContext(Dispatchers.Main) {
+                            chatAdapter.updateAttachmentStatus(mId, failedText, msg?.localPath ?: "", "FAILED")
+                            alertThreadAdapter.updateAttachmentStatus(mId, failedText, msg?.localPath ?: "", "FAILED")
                             if (currentChatPeerName == pendingMeta.senderName) {
                                 val history = db.messageDao().getChatHistory(myNickName, pendingMeta.senderName)
                                 updateChatUI(history)
                             }
+                        }
+                        if (pendingMeta.hash.isNotBlank()) {
+                            blobExchange?.want(pendingMeta.hash, pendingMeta.senderName)
+                            blobExchange?.registerCustodyHash(pendingMeta.hash, pendingMeta.senderName)
                         }
                     }
                 }
@@ -700,14 +842,21 @@ class MainActivity : AppCompatActivity() {
         val initialTop = getStatusBarAndCutoutTopInset(ViewCompat.getRootWindowInsets(window.decorView))
         applyGlobalTopInsets(initialTop)
 
+        val defaultUncaughtHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Log.e(TAG, "FATAL UNCAUGHT EXCEPTION in ${thread.name}", throwable)
+            defaultUncaughtHandler?.uncaughtException(thread, throwable)
         }
 
         onBackPressedDispatcher.addCallback(this, backPressedCallback)
         createNotificationChannelIfNeeded()
 
         db = AppDatabase.getDatabase(this)
+        blobRepository = BlobRepository(this)
+        neighborTable = NeighborTable()
+        connectionManager = ConnectionManager()
+        userManager = UserManager(this)
+        getOrCreateCriticalAlertManager()
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -715,7 +864,9 @@ class MainActivity : AppCompatActivity() {
                 db.openHelper.writableDatabase.execSQL("DELETE FROM messages WHERE text LIKE '[ALERT]:%'")
             } catch (_: Exception) {}
             withContext(Dispatchers.Main) {
-                loadPeersFromDb()
+                if (::peerAdapter.isInitialized) {
+                    loadPeersFromDb()
+                }
             }
         }
 
@@ -743,10 +894,15 @@ class MainActivity : AppCompatActivity() {
         btnClearAlerts = findViewById(R.id.btnClearAlerts)
         btnCreateAlert = findViewById(R.id.btnCreateAlert)
         textEmptyAlerts = findViewById(R.id.textEmptyAlerts)
+        imgEmptyAlerts = findViewById(R.id.imgEmptyAlerts)
+        textEmptyAlertsTitle = findViewById(R.id.textEmptyAlertsTitle)
+        textEmptyAlertsSubtitle = findViewById(R.id.textEmptyAlertsSubtitle)
         chipAlertAll = findViewById(R.id.chipAlertAll)
         chipAlertGroups = findViewById(R.id.chipAlertGroups)
         chipAlertSystem = findViewById(R.id.chipAlertSystem)
+        chipAlertCritical = findViewById(R.id.chipAlertCritical)
         layoutAlertThread = findViewById(R.id.layoutAlertThread)
+        alertThreadOriginalCard = findViewById(R.id.alertThreadOriginalCard)
         alertThreadHeader = findViewById(R.id.alertThreadHeader)
         alertThreadSenderText = findViewById(R.id.alertThreadSenderText)
         btnExitAlertThread = findViewById(R.id.btnExitAlertThread)
@@ -769,7 +925,48 @@ class MainActivity : AppCompatActivity() {
         settingsPeerId = findViewById(R.id.settingsPeerId)
         settingsStatusBadge = findViewById(R.id.settingsStatusBadge)
         btnEditIdentity = findViewById(R.id.btnEditIdentity)
+        cardConnections = findViewById(R.id.cardConnections)
+        textConnectionsSubtitle = findViewById(R.id.textConnectionsSubtitle)
+        btnViewConnections = findViewById(R.id.btnViewConnections)
+        layoutConnections = findViewById(R.id.layoutConnections)
+        btnExitConnections = findViewById(R.id.btnExitConnections)
+        textHeaderRequests = findViewById(R.id.textHeaderRequests)
+        recyclerConnectionRequests = findViewById(R.id.recyclerConnectionRequests)
+        recyclerConnectionRequests.layoutManager = LinearLayoutManager(this)
+        textHeaderConnections = findViewById(R.id.textHeaderConnections)
+        recyclerConnectedPeers = findViewById(R.id.recyclerConnectedPeers)
+        recyclerConnectedPeers.layoutManager = LinearLayoutManager(this)
+        textEmptyConnections = findViewById(R.id.textEmptyConnections)
+
+        connectedPeersListAdapter = ConnectedPeersAdapter { peer ->
+            openPeerProfile(peer.name)
+        }
+        recyclerConnectedPeers.adapter = connectedPeersListAdapter
+
+        connectionRequestsAdapter = ConnectionRequestsAdapter(
+            onAcceptClick = { peer -> acceptConnectionRequest(peer) },
+            onDeclineClick = { peer -> declineConnectionRequest(peer) },
+            onPeerClick = { peer -> openPeerProfile(peer.name) }
+        )
+        recyclerConnectionRequests.adapter = connectionRequestsAdapter
+
+        val openConnectionsListener = View.OnClickListener {
+            layoutConnections.visibility = View.VISIBLE
+            applyGlobalTopInsets(lastKnownStatusBarInset)
+            loadConnectionsFromDb()
+            updateBackCallbackState()
+        }
+        cardConnections.setOnClickListener(openConnectionsListener)
+        btnViewConnections.setOnClickListener(openConnectionsListener)
+        btnExitConnections.setOnClickListener {
+            layoutConnections.visibility = View.GONE
+            updateBackCallbackState()
+        }
+
+        messagesEmptyStateContainer = findViewById(R.id.messagesEmptyStateContainer)
+        messagesEmptyIllustration = findViewById(R.id.messagesEmptyIllustration)
         messagesEmptyText = findViewById(R.id.messagesEmptyText)
+        setupEmptyChatsIllustration()
         chatPeerAvatar = findViewById(R.id.chatPeerAvatar)
         peersRecyclerView = findViewById(R.id.peersRecyclerView)
         peersRecyclerView.layoutManager = LinearLayoutManager(this)
@@ -787,12 +984,40 @@ class MainActivity : AppCompatActivity() {
         mapDistanceMeasureText = findViewById(R.id.mapDistanceMeasureText)
         btnMapRecenter = findViewById(R.id.btnMapRecenter)
         btnMapLayers = findViewById(R.id.btnMapLayers)
+        btnMapDownloadArea = findViewById(R.id.btnMapDownloadArea)
+        mapCachingIndicator = findViewById(R.id.mapCachingIndicator)
+        btnMapTypeStreet = findViewById(R.id.btnMapTypeStreet)
+        btnMapTypeSat = findViewById(R.id.btnMapTypeSat)
+        btnMapTypeHybrid = findViewById(R.id.btnMapTypeHybrid)
+
+        btnMapTypeStreet.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET)
+        }
+        btnMapTypeSat.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE)
+        }
+        btnMapTypeHybrid.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID)
+        }
 
         locationManagerHelper = com.fury.peerconnect.logic.LocationManagerHelper(this)
-        offlineMapManager = com.fury.peerconnect.logic.OfflineMapManager(this, dashMapView).also { mgr ->
-            mgr.onCreate(savedInstanceState) {
+        try {
+            offlineMapManager = com.fury.peerconnect.logic.OfflineMapManager(this, dashMapView).also { mgr ->
+                mgr.onCreate(savedInstanceState) {
+                    runOnUiThread {
+                        startGPSUpdates()
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "OfflineMapManager initialization failed gracefully", e)
+            offlineMapManager = null
+        }
+
+        lifecycleScope.launch {
+            offlineMapManager?.prefetcher?.isPrefetching?.collect { isPrefetching ->
                 runOnUiThread {
-                    startGPSUpdates()
+                    mapCachingIndicator.visibility = if (isPrefetching) View.VISIBLE else View.GONE
                 }
             }
         }
@@ -801,9 +1026,31 @@ class MainActivity : AppCompatActivity() {
             offlineMapManager?.recenterMyGPSLocation()
         }
         btnMapLayers.setOnClickListener {
-            offlineMapManager?.cycleMapStyle { label ->
-                Toast.makeText(this, "Map Layer: $label", Toast.LENGTH_SHORT).show()
+            offlineMapManager?.cycleMapStyle { activeStyle, message ->
+                runOnUiThread {
+                    updateMapTypeSelectorUI(activeStyle)
+                    if (message != null) {
+                        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, "Map View: ${activeStyle.label}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
+        }
+        btnMapDownloadArea.setOnClickListener {
+            Toast.makeText(this, "Pre-fetching offline map tiles (2km radius)...", Toast.LENGTH_SHORT).show()
+            offlineMapManager?.downloadAreaForOffline { count ->
+                runOnUiThread {
+                    Toast.makeText(this, "Offline map ready ($count tiles cached)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        // Task 10: Debug cache stats dump (debug builds only — long-press the download button)
+        btnMapDownloadArea.setOnLongClickListener {
+            com.fury.peerconnect.logic.OfflineAuditLogger.dumpCacheStats(this, offlineMapManager)
+            Toast.makeText(this, "Cache stats dumped to logcat (tag: NEXORA_CACHE_AUDIT)", Toast.LENGTH_LONG).show()
+            true
         }
 
         val myLocProvider: () -> Pair<Double, Double>? = {
@@ -813,6 +1060,9 @@ class MainActivity : AppCompatActivity() {
         chatAdapter = ChatAdapter(
             myNickName = myNickName,
             onAttachmentClick = { fileName, uri -> openAttachment(fileName, uri) },
+            onAttachmentRetry = { messageId, hash, fileName, senderPeer ->
+                retryAttachmentDownload(messageId, hash, fileName, senderPeer)
+            },
             onLocationClick = { lat, lon, title -> showLocationOnDashboardMap(lat, lon, title) },
             myLocationProvider = myLocProvider
         )
@@ -820,6 +1070,9 @@ class MainActivity : AppCompatActivity() {
         alertThreadAdapter = ChatAdapter(
             myNickName = myNickName,
             onAttachmentClick = { fileName, uri -> openAttachment(fileName, uri) },
+            onAttachmentRetry = { messageId, hash, fileName, senderPeer ->
+                retryAttachmentDownload(messageId, hash, fileName, senderPeer)
+            },
             onLocationClick = { lat, lon, title -> showLocationOnDashboardMap(lat, lon, title) },
             myLocationProvider = myLocProvider
         )
@@ -871,7 +1124,9 @@ class MainActivity : AppCompatActivity() {
             onAlertClick = { alert -> openAlertThread(alert) },
             onLocationClick = { lat, lon, title -> showLocationOnDashboardMap(lat, lon, title) },
             onFoundPersonClick = { alert -> showFoundPersonCoordination(alert) },
-            myLocationProvider = myLocProvider
+            myLocationProvider = myLocProvider,
+            avatarIdProvider = { peerName -> cachedPeerAvatars[peerName] },
+            onPeerAvatarClick = { peerName -> openPeerProfile(peerName) }
         )
         alertsRecyclerView.adapter = alertAdapter
 
@@ -885,33 +1140,70 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        recentActivityAdapter = RecentActivityAdapter { peerName -> openChat(peerName, null) }
+        recentActivityAdapter = RecentActivityAdapter(
+            onItemClick = { peerName -> openChat(peerName, null) },
+            avatarIdProvider = { peerName -> cachedPeerAvatars[peerName] },
+            onAvatarClick = { peerName -> openPeerProfile(peerName) }
+        )
         dashRecentRecyclerView.adapter = recentActivityAdapter
 
-        peerAdapter = PeerAdapter { peer -> openChat(peer.name, peer.endpointId) }
+        peerAdapter = PeerAdapter(
+            onPeerClicked = { peer -> openChat(peer.name, peer.endpointId) },
+            onAvatarClicked = { peer -> openPeerProfile(peer.name) }
+        )
         peersRecyclerView.adapter = peerAdapter
+
+        chatPeerAvatar.setOnClickListener { currentChatPeerName?.let { openPeerProfile(it) } }
+        findViewById<TextView>(R.id.chatHeader).setOnClickListener { currentChatPeerName?.let { openPeerProfile(it) } }
 
         connectedPeerAdapter = ConnectedPeerAdapter { peer -> openChat(peer.name, peer.endpointId) }
         dashConnectedPeersRecyclerView.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         dashConnectedPeersRecyclerView.adapter = connectedPeerAdapter
 
-        val setChipSelected: (View, View, View) -> Unit = { selected, other1, other2 ->
-            selected.alpha = 1.0f
-            other1.alpha = 0.5f
-            other2.alpha = 0.5f
+        val allAlertChips = listOf(chipAlertAll, chipAlertGroups, chipAlertSystem, chipAlertCritical)
+        val updateFilterChipStyles: (View) -> Unit = { activeChip ->
+            allAlertChips.forEach { chip ->
+                val btn = chip as? com.google.android.material.button.MaterialButton ?: return@forEach
+                if (chip == activeChip) {
+                    btn.alpha = 1.0f
+                    if (chip == chipAlertCritical) {
+                        btn.setBackgroundColor(Color.parseColor("#DC2626"))
+                        btn.setTextColor(Color.WHITE)
+                        btn.strokeWidth = 0
+                    } else {
+                        btn.setBackgroundColor(ContextCompat.getColor(this, R.color.nexora_red))
+                        btn.setTextColor(Color.WHITE)
+                        btn.strokeWidth = 0
+                    }
+                } else {
+                    btn.alpha = 0.55f
+                    btn.setBackgroundColor(Color.TRANSPARENT)
+                    btn.setTextColor(ContextCompat.getColor(this, R.color.nexora_text_secondary))
+                    btn.strokeColor = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(this, R.color.nexora_border))
+                    btn.strokeWidth = (1 * resources.displayMetrics.density).toInt()
+                }
+            }
         }
 
         chipAlertAll.setOnClickListener {
-            setChipSelected(chipAlertAll, chipAlertGroups, chipAlertSystem)
+            updateFilterChipStyles(chipAlertAll)
             alertAdapter.applyFilter("ALL")
         }
         chipAlertGroups.setOnClickListener {
-            setChipSelected(chipAlertGroups, chipAlertAll, chipAlertSystem)
+            updateFilterChipStyles(chipAlertGroups)
             alertAdapter.applyFilter("GROUPS")
         }
         chipAlertSystem.setOnClickListener {
-            setChipSelected(chipAlertSystem, chipAlertAll, chipAlertGroups)
+            updateFilterChipStyles(chipAlertSystem)
             alertAdapter.applyFilter("SYSTEM")
+        }
+        chipAlertCritical.setOnClickListener {
+            updateFilterChipStyles(chipAlertCritical)
+            alertAdapter.applyFilter("CRITICAL")
+        }
+
+        alertAdapter.onFilterChanged = { filter, count ->
+            updateAlertsEmptyState(filter, count)
         }
 
         checkIdentity()
@@ -959,6 +1251,21 @@ class MainActivity : AppCompatActivity() {
         btnAddContact.setOnClickListener(addContactClickListener)
 
         btnExitChat.setOnClickListener { closeChat() }
+        btnConnectChat = findViewById(R.id.btnConnectChat)
+        btnConnectChat.setOnClickListener {
+            val peerName = currentChatPeerName ?: return@setOnClickListener
+            btnConnectChat.text = "Connecting..."
+            val foundEp = discoveredEndpoints.entries.firstOrNull { it.value == peerName }?.key
+            if (foundEp != null) {
+                Toast.makeText(this, "Connecting to $peerName...", Toast.LENGTH_SHORT).show()
+                Nearby.getConnectionsClient(this).requestConnection(myNickName, foundEp, connectionLifecycleCallback)
+            } else {
+                Toast.makeText(this, "Searching for $peerName nearby...", Toast.LENGTH_SHORT).show()
+                pendingDirectConnectPeer = peerName
+                if (!isDiscovering) startDiscovery()
+                if (!isAdvertising) startAdvertising()
+            }
+        }
         btnSend.setOnClickListener {
             val text = editMessage.text.toString().trim()
             if (text.isNotEmpty()) {
@@ -968,7 +1275,45 @@ class MainActivity : AppCompatActivity() {
         btnAttach.setOnClickListener {
             showChatAttachmentMenu()
         }
-        btnEditIdentity.setOnClickListener { showNameInputDialog() }
+        btnEditIdentity.setOnClickListener { showEditProfileDialog() }
+        settingsAvatar.setOnClickListener { showEditProfileDialog() }
+        settingsDisplayName.setOnClickListener { showEditProfileDialog() }
+
+        // Initialize Peer Profile Screen views
+        layoutPeerProfile = findViewById(R.id.layoutPeerProfile)
+        peerProfileAppBar = findViewById(R.id.peerProfileAppBar)
+        btnExitPeerProfile = findViewById(R.id.btnExitPeerProfile)
+        peerProfileTopTitle = findViewById(R.id.peerProfileTopTitle)
+        peerProfileTopSubtitle = findViewById(R.id.peerProfileTopSubtitle)
+        peerProfileAvatar = findViewById(R.id.peerProfileAvatar)
+        peerProfileName = findViewById(R.id.peerProfileName)
+        peerProfileStatusBadge = findViewById(R.id.peerProfileStatusBadge)
+        btnPeerMessage = findViewById(R.id.btnPeerMessage)
+        btnPeerConnect = findViewById(R.id.btnPeerConnect)
+        layoutPeerRequestActions = findViewById(R.id.layoutPeerRequestActions)
+        btnPeerAccept = findViewById(R.id.btnPeerAccept)
+        btnPeerDecline = findViewById(R.id.btnPeerDecline)
+        peerProfileDeviceId = findViewById(R.id.peerProfileDeviceId)
+        peerProfileVersion = findViewById(R.id.peerProfileVersion)
+        peerProfileConnStatus = findViewById(R.id.peerProfileConnStatus)
+        peerProfileDistance = findViewById(R.id.peerProfileDistance)
+        peerProfileLocationDetails = findViewById(R.id.peerProfileLocationDetails)
+        peerProfileRoute = findViewById(R.id.peerProfileRoute)
+        peerProfileLastSeen = findViewById(R.id.peerProfileLastSeen)
+        peerProfileMediaCount = findViewById(R.id.peerProfileMediaCount)
+        recyclerPeerSharedMedia = findViewById(R.id.recyclerPeerSharedMedia)
+        textEmptySharedMedia = findViewById(R.id.textEmptySharedMedia)
+
+        peerSharedMediaAdapter = PeerSharedMediaAdapter { fileName, uri ->
+            openAttachment(fileName, uri)
+        }
+        recyclerPeerSharedMedia.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        recyclerPeerSharedMedia.adapter = peerSharedMediaAdapter
+
+        btnExitPeerProfile.setOnClickListener { closePeerProfile() }
+        peerProfileAvatar.setOnClickListener {
+            currentProfilePeerName?.let { name -> showFullScreenAvatarViewer(name) }
+        }
 
         if (!hasPermissions()) {
             permissionLauncher.launch(requiredPermissions)
@@ -993,6 +1338,64 @@ class MainActivity : AppCompatActivity() {
         layoutSettings.visibility = if (activeLayout == layoutSettings) View.VISIBLE else View.GONE
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupEmptyChatsIllustration() {
+        messagesEmptyIllustration.apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            setOnTouchListener { _, _ -> true }
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                builtInZoomControls = false
+                displayZoomControls = false
+                setSupportZoom(false)
+            }
+            try {
+                val rawSvg = assets.open("nexora_empty_chats_person_animated.svg")
+                    .bufferedReader()
+                    .use { it.readText() }
+                val cleanSvg = rawSvg.replaceFirst(Regex("""<\?xml[^>]*\?>"""), "").trim()
+                val html = """
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                    <style>
+                      * { margin: 0; padding: 0; box-sizing: border-box; }
+                      html, body {
+                        width: 100%;
+                        height: 100%;
+                        background-color: transparent;
+                        overflow: hidden;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                      }
+                      svg {
+                        width: 100%;
+                        height: 100%;
+                        max-width: 100%;
+                        max-height: 100%;
+                        display: block;
+                      }
+                    </style>
+                    </head>
+                    <body>
+                    $cleanSvg
+                    </body>
+                    </html>
+                """.trimIndent()
+                loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading empty chats animated SVG", e)
+            }
+        }
+    }
+
     private fun checkIdentity() {
         val userManager = UserManager(this)
         if (userManager.hasIdentity()) {
@@ -1007,6 +1410,9 @@ class MainActivity : AppCompatActivity() {
             chatAdapter = ChatAdapter(
                 myNickName = myNickName,
                 onAttachmentClick = { fileName, uri -> openAttachment(fileName, uri) },
+                onAttachmentRetry = { messageId, hash, fileName, senderPeer ->
+                    retryAttachmentDownload(messageId, hash, fileName, senderPeer)
+                },
                 onLocationClick = { lat, lon, title -> showLocationOnDashboardMap(lat, lon, title) },
                 myLocationProvider = myLocProvider
             )
@@ -1014,6 +1420,9 @@ class MainActivity : AppCompatActivity() {
             alertThreadAdapter = ChatAdapter(
                 myNickName = myNickName,
                 onAttachmentClick = { fileName, uri -> openAttachment(fileName, uri) },
+                onAttachmentRetry = { messageId, hash, fileName, senderPeer ->
+                    retryAttachmentDownload(messageId, hash, fileName, senderPeer)
+                },
                 onLocationClick = { lat, lon, title -> showLocationOnDashboardMap(lat, lon, title) },
                 myLocationProvider = myLocProvider
             )
@@ -1027,29 +1436,481 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showNameInputDialog() {
+        window.decorView.post {
+            if (!isFinishing && !isDestroyed) {
+                showEditProfileDialog(isFirstTime = true)
+            }
+        }
+    }
+
+    private fun showEditProfileDialog(isFirstTime: Boolean = false) {
         if (isFinishing || isDestroyed) return
         try {
-            val input = EditText(this).apply {
-                hint = "Enter your unique ID/Name"
+            val userManager = UserManager(this)
+            val currentName = userManager.getUsername() ?: ""
+            var selectedAvatar = userManager.getAvatarId()
+
+            val dialogView = layoutInflater.inflate(R.layout.dialog_edit_profile, null)
+            val imgPreview = dialogView.findViewById<com.google.android.material.imageview.ShapeableImageView>(R.id.imgCurrentAvatarPreview)
+            val editName = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.editProfileDisplayName)
+            val recyclerAvatars = dialogView.findViewById<RecyclerView>(R.id.recyclerAvatarOptions)
+            val btnCancel = dialogView.findViewById<View>(R.id.btnCancelEditProfile)
+            val btnSave = dialogView.findViewById<View>(R.id.btnSaveProfile)
+
+            AvatarManager.loadAvatar(imgPreview, selectedAvatar)
+            if (currentName.isNotEmpty()) {
+                editName.setText(currentName)
             }
-            AlertDialog.Builder(this)
-                .setTitle("Welcome to NEXORA")
-                .setView(input)
-                .setCancelable(false)
-                .setPositiveButton("Save") { _, _ ->
-                    val name = input.text.toString().trim()
-                    if (name.isNotEmpty()) {
-                        UserManager(this).saveUsername(name)
+
+            val pickerAdapter = AvatarPickerAdapter(selectedAvatar) { newAvatarId ->
+                selectedAvatar = newAvatarId
+                AvatarManager.loadAvatar(imgPreview, selectedAvatar)
+            }
+            recyclerAvatars.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+            recyclerAvatars.adapter = pickerAdapter
+
+            val dialog = AlertDialog.Builder(this)
+                .setView(dialogView)
+                .setCancelable(!isFirstTime)
+                .create()
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+            btnCancel.visibility = if (isFirstTime) View.GONE else View.VISIBLE
+            btnCancel.setOnClickListener { dialog.dismiss() }
+
+            btnSave.setOnClickListener {
+                val newName = editName.text?.toString()?.trim() ?: ""
+                if (newName.isNotEmpty()) {
+                    val oldName = myNickName
+                    val oldAvatar = userManager.getAvatarId()
+                    val newVersion = userManager.saveProfile(newName, selectedAvatar)
+                    dialog.dismiss()
+                    if (isFirstTime || oldName.isEmpty()) {
                         checkIdentity()
                     } else {
-                        showNameInputDialog()
+                        handleProfileUpdated(oldName, newName, oldAvatar, selectedAvatar, newVersion)
+                    }
+                } else {
+                    Toast.makeText(this, "Please enter a valid display name", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            dialog.show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error displaying edit profile dialog", e)
+        }
+    }
+
+    private fun handleProfileUpdated(
+        oldName: String,
+        newName: String,
+        oldAvatar: String,
+        newAvatar: String,
+        newVersion: Long
+    ) {
+        val previousNick = myNickName
+        myNickName = newName
+        val myDeviceId = UserManager(this).getDeviceId()
+
+        if (oldName != newName) {
+            routingEngine?.updateMyDeviceId(newName, previousNick)
+            nearbyMeshTransport?.updateMyPeerName(newName)
+            blobExchange?.myPeerId = newName
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (oldName != newName) {
+                try {
+                    db.messageDao().migrateSenderName(oldName, newName)
+                    db.messageDao().migrateReceiverName(oldName, newName)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed migrating messages on name change", e)
+                }
+            }
+
+            val profileBody = "[PEER_PROFILE]:$myDeviceId|$newName|$newAvatar|$newVersion"
+            val chatMsg = ChatMessage(newName, SecurityHelper.encrypt(profileBody), System.currentTimeMillis())
+            val bytes = serialize(chatMsg)
+            try {
+                routingEngine?.broadcastAlert(bytes)
+                for (ep in activeEndpoints) {
+                    nearbyMeshTransport?.send(
+                        MeshMessage(
+                            sourcePeerId = newName,
+                            destinationPeerId = null,
+                            type = MessageType.BROADCAST_ALERT,
+                            payload = bytes
+                        ),
+                        ep
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error broadcasting profile update", e)
+            }
+
+            if (oldName != newName) {
+                val renameBody = "[PEER_RENAME]:$myDeviceId|$oldName|$newName|$newAvatar|$newVersion"
+                val renameMsg = ChatMessage(newName, SecurityHelper.encrypt(renameBody), System.currentTimeMillis())
+                val renameBytes = serialize(renameMsg)
+                try {
+                    routingEngine?.broadcastAlert(renameBytes)
+                    for (ep in activeEndpoints) {
+                        nearbyMeshTransport?.send(
+                            MeshMessage(
+                                sourcePeerId = newName,
+                                destinationPeerId = null,
+                                type = MessageType.BROADCAST_ALERT,
+                                payload = renameBytes
+                            ),
+                            ep
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error broadcasting rename", e)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                updateSettingsUI()
+                updateGreeting()
+                checkIdentity()
+                loadPeersFromDb()
+                loadConnectionsFromDb()
+
+                if (isAdvertising) {
+                    try {
+                        Nearby.getConnectionsClient(this@MainActivity).stopAdvertising()
+                    } catch (_: Exception) {}
+                    isAdvertising = false
+                    startAdvertising()
+                }
+            }
+        }
+    }
+
+    private fun loadConnectionsFromDb() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val connected = db.peerDao().getConnectedPeers()
+            val requests = db.peerDao().getConnectionRequests()
+            withContext(Dispatchers.Main) {
+                if (!::connectedPeersListAdapter.isInitialized || !::connectionRequestsAdapter.isInitialized || !::textConnectionsSubtitle.isInitialized) {
+                    return@withContext
+                }
+                textConnectionsSubtitle.text = "${connected.size} Connected · ${requests.size} Requests"
+                connectedPeersListAdapter.setPeers(connected)
+                connectionRequestsAdapter.setRequests(requests)
+
+                textHeaderRequests.text = "REQUESTS (${requests.size})"
+                textHeaderRequests.visibility = if (requests.isNotEmpty()) View.VISIBLE else View.GONE
+                recyclerConnectionRequests.visibility = if (requests.isNotEmpty()) View.VISIBLE else View.GONE
+
+                textEmptyConnections.visibility = if (connected.isEmpty() && requests.isEmpty()) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun sendConnectionRequest(targetPeerName: String) {
+        val myDeviceId = UserManager(this).getDeviceId()
+        val myAvatar = UserManager(this).getAvatarId()
+        val reqBody = "[CONN_REQ]:$myDeviceId|$myNickName|$myAvatar"
+        val chatMsg = ChatMessage(myNickName, SecurityHelper.encrypt(reqBody), System.currentTimeMillis())
+        val bytes = serialize(chatMsg)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                routingEngine?.sendDirectMessage(targetPeerName, bytes)
+                routingEngine?.broadcastAlert(bytes)
+                for (ep in activeEndpoints) {
+                    if (pendingConnections[ep] == targetPeerName) {
+                        nearbyMeshTransport?.send(
+                            MeshMessage(
+                                sourcePeerId = myNickName,
+                                destinationPeerId = targetPeerName,
+                                type = MessageType.DIRECT,
+                                payload = bytes
+                            ),
+                            ep
+                        )
                     }
                 }
-                .create()
-                .show()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error displaying name dialog", e)
+                db.peerDao().updateConnectionStatus(targetPeerName, "REQUEST_SENT", false)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending connection request to $targetPeerName", e)
+            }
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "Connection request sent to $targetPeerName", Toast.LENGTH_SHORT).show()
+                loadPeersFromDb()
+                loadConnectionsFromDb()
+            }
         }
+    }
+
+    private fun acceptConnectionRequest(peer: PeerEntity) {
+        val myDeviceId = UserManager(this).getDeviceId()
+        val myAvatar = UserManager(this).getAvatarId()
+        val respBody = "[CONN_RESP]:$myDeviceId|$myNickName|$myAvatar|ACCEPT"
+        val chatMsg = ChatMessage(myNickName, SecurityHelper.encrypt(respBody), System.currentTimeMillis())
+        val bytes = serialize(chatMsg)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                routingEngine?.sendDirectMessage(peer.name, bytes)
+                routingEngine?.broadcastAlert(bytes)
+                for (ep in activeEndpoints) {
+                    if (pendingConnections[ep] == peer.name) {
+                        nearbyMeshTransport?.send(
+                            MeshMessage(
+                                sourcePeerId = myNickName,
+                                destinationPeerId = peer.name,
+                                type = MessageType.DIRECT,
+                                payload = bytes
+                            ),
+                            ep
+                        )
+                    }
+                }
+                db.peerDao().updateConnectionStatus(peer.name, "CONNECTED", true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error accepting connection request from ${peer.name}", e)
+            }
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "Connected with ${peer.name}", Toast.LENGTH_SHORT).show()
+                loadPeersFromDb()
+                loadConnectionsFromDb()
+            }
+        }
+    }
+
+    private fun declineConnectionRequest(peer: PeerEntity) {
+        val myDeviceId = UserManager(this).getDeviceId()
+        val myAvatar = UserManager(this).getAvatarId()
+        val respBody = "[CONN_RESP]:$myDeviceId|$myNickName|$myAvatar|DECLINE"
+        val chatMsg = ChatMessage(myNickName, SecurityHelper.encrypt(respBody), System.currentTimeMillis())
+        val bytes = serialize(chatMsg)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                routingEngine?.sendDirectMessage(peer.name, bytes)
+                routingEngine?.broadcastAlert(bytes)
+                for (ep in activeEndpoints) {
+                    if (pendingConnections[ep] == peer.name) {
+                        nearbyMeshTransport?.send(
+                            MeshMessage(
+                                sourcePeerId = myNickName,
+                                destinationPeerId = peer.name,
+                                type = MessageType.DIRECT,
+                                payload = bytes
+                            ),
+                            ep
+                        )
+                    }
+                }
+                db.peerDao().updateConnectionStatus(peer.name, "REACHABLE", false)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error declining connection request from ${peer.name}", e)
+            }
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "Declined connection request from ${peer.name}", Toast.LENGTH_SHORT).show()
+                loadPeersFromDb()
+                loadConnectionsFromDb()
+            }
+        }
+    }
+
+    private fun openPeerProfile(peerName: String) {
+        if (isFinishing || isDestroyed) return
+        currentProfilePeerName = peerName
+        layoutPeerProfile.visibility = View.VISIBLE
+        applyGlobalTopInsets(lastKnownStatusBarInset)
+        ViewCompat.requestApplyInsets(layoutPeerProfile)
+        updateBackCallbackState()
+
+        refreshPeerProfileUI(peerName)
+    }
+
+    private fun closePeerProfile() {
+        currentProfilePeerName = null
+        layoutPeerProfile.visibility = View.GONE
+        updateBackCallbackState()
+    }
+
+    private fun refreshPeerProfileUI(peerName: String) {
+        if (isFinishing || isDestroyed) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val peer = db.peerDao().getPeerByName(peerName)
+            val isDirectlyConnected = activeEndpoints.any { pendingConnections[it] == peerName }
+            val isMeshReachable = routingEngine?.isPeerReachable(peerName) == true
+            val isReachable = isDirectlyConnected || isMeshReachable
+
+            val history = db.messageDao().getChatHistory(myNickName, peerName)
+            val mediaFiles = history.filter { msg ->
+                msg.alertId == null && (
+                    msg.messageType.equals("IMAGE", ignoreCase = true) ||
+                    msg.messageType.equals("FILE", ignoreCase = true) ||
+                    msg.text.startsWith("[FILE]:") ||
+                    msg.text.startsWith("📄 Shared a file: ") ||
+                    msg.text.contains("Shared a file: ") ||
+                    msg.fileName != null
+                )
+            }.reversed()
+
+            withContext(Dispatchers.Main) {
+                if (currentProfilePeerName != peerName) return@withContext
+
+                peerProfileTopTitle.text = peerName
+                peerProfileName.text = peerName
+                val avatarId = peer?.avatarId ?: cachedPeerAvatars[peerName]
+                AvatarManager.loadAvatar(peerProfileAvatar, avatarId)
+
+                val isConnected = peer?.isConnected == true
+                val connStatus = peer?.connectionStatus ?: "DISCOVERED"
+
+                val statusText: String
+                val statusColor: Int
+                when {
+                    isConnected -> {
+                        statusText = if (isReachable) "● Connected" else "○ Connected (Offline)"
+                        statusColor = Color.parseColor(if (isReachable) "#16A34A" else "#9CA3AF")
+                    }
+                    connStatus == "REQUEST_SENT" -> {
+                        statusText = "⏳ Request Sent"
+                        statusColor = Color.parseColor("#F59E0B")
+                    }
+                    connStatus == "REQUEST_RECEIVED" -> {
+                        statusText = "● Request Received"
+                        statusColor = Color.parseColor("#0284C7")
+                    }
+                    isReachable -> {
+                        statusText = "● Reachable"
+                        statusColor = Color.parseColor("#0284C7")
+                    }
+                    else -> {
+                        statusText = "○ Offline"
+                        statusColor = Color.parseColor("#9CA3AF")
+                    }
+                }
+                peerProfileTopSubtitle.text = statusText
+                peerProfileTopSubtitle.setTextColor(statusColor)
+                peerProfileStatusBadge.text = statusText
+                peerProfileStatusBadge.setTextColor(statusColor)
+
+                // Identity / About
+                peerProfileDeviceId.text = peer?.deviceId?.takeIf { it.isNotBlank() } ?: "Not available"
+                peerProfileVersion.text = "v${peer?.profileVersion ?: 1L}"
+                peerProfileConnStatus.text = if (isConnected) "CONNECTED" else connStatus
+
+                // Action buttons
+                btnPeerMessage.visibility = View.GONE
+                btnPeerConnect.visibility = View.GONE
+                layoutPeerRequestActions.visibility = View.GONE
+
+                if (isConnected) {
+                    btnPeerMessage.visibility = View.VISIBLE
+                    btnPeerMessage.setOnClickListener {
+                        closePeerProfile()
+                        openChat(peerName, peer?.endpointId)
+                    }
+                } else if (connStatus == "REQUEST_RECEIVED") {
+                    layoutPeerRequestActions.visibility = View.VISIBLE
+                    btnPeerAccept.setOnClickListener {
+                        if (peer != null) {
+                            acceptConnectionRequest(peer)
+                            refreshPeerProfileUI(peerName)
+                        }
+                    }
+                    btnPeerDecline.setOnClickListener {
+                        if (peer != null) {
+                            declineConnectionRequest(peer)
+                            refreshPeerProfileUI(peerName)
+                        }
+                    }
+                } else if (connStatus == "REQUEST_SENT") {
+                    btnPeerConnect.visibility = View.VISIBLE
+                    btnPeerConnect.text = "Request Pending"
+                    btnPeerConnect.isEnabled = false
+                } else if (isReachable || (peer != null && peer.isOnline)) {
+                    btnPeerConnect.visibility = View.VISIBLE
+                    btnPeerConnect.text = "Connect"
+                    btnPeerConnect.isEnabled = true
+                    btnPeerConnect.setOnClickListener {
+                        sendConnectionRequest(peerName)
+                        refreshPeerProfileUI(peerName)
+                    }
+                }
+
+                // Location
+                if (peer?.lastDistanceMeters != null) {
+                    val distFormatted = com.fury.peerconnect.logic.DistanceEngine.formatDistance(peer.lastDistanceMeters)
+                    peerProfileDistance.text = "$distFormatted away"
+                    peerProfileLocationDetails.text = if (peer.latitude != null && peer.longitude != null) {
+                        String.format(Locale.US, "GPS: %.4f, %.4f", peer.latitude, peer.longitude)
+                    } else {
+                        "Estimated via direct radio proximity"
+                    }
+                } else {
+                    peerProfileDistance.text = "Location not shared yet"
+                    peerProfileLocationDetails.text = "Will be updated when peer shares location or sends alerts"
+                }
+
+                // Connection route & last seen
+                if (isDirectlyConnected) {
+                    peerProfileRoute.text = "Direct peer-to-peer connection"
+                    peerProfileLastSeen.text = "Active now in range"
+                } else if (isMeshReachable || (peer != null && peer.isReachable)) {
+                    val hops = if ((peer?.hopDistance ?: 0) > 0) peer!!.hopDistance else 2
+                    val via = if (peer?.nextHop.isNullOrEmpty()) "" else " via ${peer?.nextHop}"
+                    peerProfileRoute.text = "Multi-hop mesh: $hops hops$via"
+                    peerProfileLastSeen.text = "Reachable via relay nodes"
+                } else {
+                    peerProfileRoute.text = "Offline"
+                    val timeStr = if (peer != null && peer.lastSeenTimestamp > 0) {
+                        "Last seen: " + android.text.format.DateFormat.format("MMM dd, hh:mm a", peer.lastSeenTimestamp).toString()
+                    } else {
+                        "Not currently in mesh range"
+                    }
+                    peerProfileLastSeen.text = timeStr
+                }
+
+                // Shared Media & Files
+                peerSharedMediaAdapter.setItems(mediaFiles)
+                peerProfileMediaCount.text = "${mediaFiles.size} items"
+                if (mediaFiles.isEmpty()) {
+                    textEmptySharedMedia.visibility = View.VISIBLE
+                    recyclerPeerSharedMedia.visibility = View.GONE
+                } else {
+                    textEmptySharedMedia.visibility = View.GONE
+                    recyclerPeerSharedMedia.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    private fun showFullScreenAvatarViewer(peerName: String) {
+        if (isFinishing || isDestroyed) return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_avatar_viewer, null)
+        val imgAvatarLarge = dialogView.findViewById<com.google.android.material.imageview.ShapeableImageView>(R.id.imageAvatarViewerLarge)
+        val txtTitle = dialogView.findViewById<TextView>(R.id.textAvatarViewerTitle)
+        val btnClose = dialogView.findViewById<View>(R.id.btnCloseAvatarViewer)
+
+        txtTitle.text = peerName
+        val avatarId = cachedPeerAvatars[peerName]
+        AvatarManager.loadAvatar(imgAvatarLarge, avatarId)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        btnClose.setOnClickListener { dialog.dismiss() }
+        dialog.show()
+    }
+
+    private fun showPeerProfileDialog(peerName: String) = openPeerProfile(peerName)
+
+    private fun handleIdentityChanged(oldName: String, newName: String) {
+        val userManager = UserManager(this)
+        val avatar = userManager.getAvatarId()
+        val version = userManager.getProfileVersion()
+        handleProfileUpdated(oldName, newName, avatar, avatar, version)
     }
 
     private fun initMeshNetwork() {
@@ -1100,51 +1961,7 @@ class MainActivity : AppCompatActivity() {
                 }
             },
             onBlobObtained = { hash: String ->
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val blobFile = blobRepository.getFile(hash)
-                    val path = blobFile?.absolutePath
-                    val length = blobFile?.length() ?: 0L
-                    Log.d(TAG, "ATTACHMENT_ON_OBTAINED: hash=$hash bytes=$length")
-                    Log.d(TAG, "TIMING_METRIC: [7] blob finalized: hash=$hash bytes=$length")
-                    val fileMessages = db.messageDao().getAllFileMessages()
-                    for (msg in fileMessages) {
-                        val fn = msg.fileName
-                        if (msg.text.contains("|$hash|") || msg.text.contains("|$hash") || (fn != null && fn.contains(hash))) {
-                            val newText = "[FILE]:${msg.fileName ?: "attachment"}|$path|$hash|$length|SUCCESS"
-                            db.messageDao().updateFileDetails(msg.id.toLong(), newText, path ?: "", "SUCCESS", length)
-                            Log.d(TAG, "ATTACHMENT_MESSAGE_UPDATED: id=${msg.id} hash=$hash")
-                        }
-                    }
-
-                    val alerts = db.alertDao().getAllAlerts()
-                    for (alert in alerts) {
-                        val att = alert.attachmentPath
-                        if (att != null && att.contains(hash)) {
-                            val clean = att.removePrefix("[FILE]:")
-                            val parts = clean.split("|")
-                            val fn = parts.getOrNull(0) ?: "attachment"
-                            val updatedAttachment = "[FILE]:$fn|$path|$hash|$length|SUCCESS"
-                            db.alertDao().updateAlert(alert.copy(attachmentPath = updatedAttachment))
-                            Log.d(TAG, "ATTACHMENT_ALERT_UPDATED: alertId=${alert.alertId} hash=$hash")
-                        }
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        Log.d(TAG, "TIMING_METRIC: [8] UI becomes available: hash=$hash")
-                        if (currentChatPeerName != null) {
-                            val history = db.messageDao().getChatHistory(myNickName, currentChatPeerName!!)
-                            updateChatUI(history)
-                        }
-                        loadAlertsFromDb()
-                        if (currentAlertThreadId != null) {
-                            val currentAlert = db.alertDao().getAlertByAlertId(currentAlertThreadId!!)
-                                ?: db.alertDao().getAlertById(currentAlertThreadId!!.toIntOrNull() ?: -1)
-                            if (currentAlert != null) {
-                                bindAlertAttachment(currentAlert)
-                            }
-                        }
-                    }
-                }
+                handleBlobObtained(hash)
             }
         )
 
@@ -1217,7 +2034,7 @@ class MainActivity : AppCompatActivity() {
                 }
             },
             isPeerAuthorized = { peerId ->
-                runBlocking(Dispatchers.IO) {
+                peerId == myNickName || activeEndpoints.any { pendingConnections[it] == peerId } || runBlocking(Dispatchers.IO) {
                     db.peerDao().isKnownPeer(peerId)
                 }
             },
@@ -1247,6 +2064,8 @@ class MainActivity : AppCompatActivity() {
             nearbyMeshTransport?.let { registerTransport(it) }
         }
 
+        criticalAlertManager = getOrCreateCriticalAlertManager()
+
         wifiP2pMeshManager = WifiP2pMeshManager(
             context = this,
             myDeviceId = myNickName,
@@ -1274,6 +2093,7 @@ class MainActivity : AppCompatActivity() {
         }
         registerP2pReceiver()
     }
+
 
     private fun registerP2pReceiver() {
         val wm = wifiP2pMeshManager ?: return
@@ -1309,6 +2129,8 @@ class MainActivity : AppCompatActivity() {
             startDiscovery()
             if (activeEndpoints.isNotEmpty()) {
                 updateStatus("CONNECTED")
+            } else if (currentChatPeerName == null) {
+                updateStatus("AUTO: DISCOVERING")
             }
         }
     }
@@ -1393,14 +2215,40 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (endpointId == focusedChatEndpointId) {
                     focusedChatEndpointId = activeEndpoints.firstOrNull()
-                    if (focusedChatEndpointId == null) {
-                        updateStatus("OFFLINE")
-                    }
+                }
+                if (activeEndpoints.isEmpty()) {
+                    updateStatus("OFFLINE")
+                }
+                if (currentChatPeerName == peerName) {
+                    chatStatusText.text = "○ Offline"
+                    chatStatusText.setTextColor(Color.parseColor("#9CA3AF"))
+                    btnConnectChat.visibility = View.VISIBLE
+                    btnConnectChat.text = "Connect"
                 }
             }
             try {
                 Nearby.getConnectionsClient(this).disconnectFromEndpoint(endpointId)
             } catch (_: Exception) {}
+            blobExchange?.onNeighborDisconnected(peerName)
+            val interruptedEntries = pendingFileMetadataMap.filter { it.value.endpointId == endpointId || it.value.senderName == peerName }
+            for ((pId, meta) in interruptedEntries) {
+                pendingFileMetadataMap.remove(pId)
+                incomingFilePayloads.remove(pId)
+                meta.messageId?.let { mId ->
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        db.messageDao().updateTransferStatus(mId, "FAILED")
+                        val msg = db.messageDao().getMessageById(mId)
+                        val failedText = msg?.text?.replace("|RECEIVING", "|FAILED") ?: ""
+                        if (failedText.isNotBlank()) {
+                            db.messageDao().updateFileDetails(mId, failedText, msg?.localPath ?: "", "FAILED", msg?.fileSize ?: 0L)
+                        }
+                        withContext(Dispatchers.Main) {
+                            chatAdapter.updateAttachmentStatus(mId, failedText, msg?.localPath ?: "", "FAILED")
+                            alertThreadAdapter.updateAttachmentStatus(mId, failedText, msg?.localPath ?: "", "FAILED")
+                        }
+                    }
+                }
+            }
             lifecycleScope.launch(Dispatchers.IO) {
                 db.peerDao().markPeerOffline(peerName)
                 broadcastPresenceUpdate(peerName, PeerStatus.DISCONNECTED)
@@ -1409,6 +2257,12 @@ class MainActivity : AppCompatActivity() {
                     if (currentChatPeerName == peerName) {
                         val isReachable = routingEngine?.isPeerReachable(peerName) == true
                         updateStatus(if (isReachable) "CONNECTED" else "OFFLINE")
+                        chatStatusText.text = if (isReachable) "● Connected" else "○ Offline"
+                        chatStatusText.setTextColor(if (isReachable) Color.parseColor("#16A34A") else Color.parseColor("#9CA3AF"))
+                        btnConnectChat.visibility = if (isReachable) View.GONE else View.VISIBLE
+                        btnConnectChat.text = "Connect"
+                        val history = db.messageDao().getChatHistory(myNickName, peerName)
+                        updateChatUI(history)
                     }
                 }
             }
@@ -1438,9 +2292,13 @@ class MainActivity : AppCompatActivity() {
 
         val isReachable = isDirectlyConnected || (routingEngine?.isPeerReachable(peerName) == true)
         updateStatus(if (isReachable) "CONNECTED" else "OFFLINE")
+        chatStatusText.text = if (isReachable) "● Connected" else "○ Offline"
+        chatStatusText.setTextColor(if (isReachable) Color.parseColor("#16A34A") else Color.parseColor("#9CA3AF"))
+        btnConnectChat.visibility = if (isDirectlyConnected || isReachable) View.GONE else View.VISIBLE
+        btnConnectChat.text = "Connect"
 
         findViewById<TextView>(R.id.chatHeader).text = peerName
-        chatPeerAvatar.text = peerName.take(1).uppercase(Locale.ROOT)
+        AvatarManager.loadAvatar(chatPeerAvatar, cachedPeerAvatars[peerName])
 
         lifecycleScope.launch(Dispatchers.IO) {
             val unreadMessages = db.messageDao().getUnreadIncomingMessages(peerName, myNickName)
@@ -1463,8 +2321,10 @@ class MainActivity : AppCompatActivity() {
     private fun closeChat() {
         currentChatPeerName = null
         focusedChatEndpointId = null
+        pendingDirectConnectPeer = null
         layoutChat.visibility = View.GONE
         updateBackCallbackState()
+        loadPeersFromDb()
     }
 
     private fun updateChatUI(history: List<MessageEntity>) {
@@ -1473,7 +2333,6 @@ class MainActivity : AppCompatActivity() {
         if (chatAdapter.itemCount > 0) {
             chatRecyclerView.scrollToPosition(chatAdapter.itemCount - 1)
         }
-        messagesEmptyText.visibility = if (filteredHistory.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun sendMessage(messageText: String) {
@@ -1541,6 +2400,15 @@ class MainActivity : AppCompatActivity() {
         payloadBytes: ByteArray
     ) {
         if (type == MessageType.TOPOLOGY_SYNC) return
+        val wireEnvelope = WireEnvelope.deserialize(payloadBytes)
+        if (wireEnvelope != null) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val mgr = criticalAlertManager ?: getOrCreateCriticalAlertManager()
+                mgr.processIncomingWireEnvelope(wireEnvelope, sourcePeerId, "MESH")
+                loadAlertsFromDb()
+            }
+            return
+        }
         try {
             val msg = deserialize(payloadBytes)
             val decrypted = SecurityHelper.decrypt(msg.messageBody)
@@ -1569,6 +2437,312 @@ class MainActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
+            // Peer Rename Announcement
+            if (decryptedBody.startsWith("[PEER_RENAME]:")) {
+                val clean = decryptedBody.removePrefix("[PEER_RENAME]:")
+                val parts = clean.split("|")
+                if (parts.size >= 3) {
+                    val peerDeviceId = parts[0]
+                    val oldName = parts[1]
+                    val newName = parts[2]
+                    val newAvatar = parts.getOrNull(3)
+                    val newVersion = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                    Log.i(TAG, "PEER_RENAME_RECEIVED: device=$peerDeviceId $oldName -> $newName avatar=$newAvatar ver=$newVersion")
+
+                    val existingPeer = db.peerDao().getPeerByName(oldName)
+                        ?: (if (peerDeviceId.isNotBlank()) db.peerDao().getPeerByDeviceId(peerDeviceId) else null)
+                    val epId = existingPeer?.endpointId?.takeIf { it.isNotEmpty() }
+                        ?: nearbyMeshTransport?.getEndpointForPeer(oldName)
+                        ?: (if (activeEndpoints.contains(sourceEndpointOrPeer)) sourceEndpointOrPeer else "")
+
+                    val finalAvatar = newAvatar ?: existingPeer?.avatarId ?: AvatarManager.DEFAULT_AVATAR_ID
+                    val finalVersion = if (newVersion > 0) newVersion else (existingPeer?.profileVersion ?: 1L)
+
+                    db.peerDao().deletePeerByName(oldName)
+                    db.peerDao().insertPeer(
+                        PeerEntity(
+                            name = newName,
+                            endpointId = epId,
+                            lastSeenTimestamp = System.currentTimeMillis(),
+                            isOnline = existingPeer?.isOnline ?: true,
+                            nextHop = newName,
+                            hopDistance = existingPeer?.hopDistance ?: 1,
+                            isReachable = existingPeer?.isReachable ?: true,
+                            deviceId = peerDeviceId,
+                            avatarId = finalAvatar,
+                            profileVersion = finalVersion,
+                            connectionStatus = existingPeer?.connectionStatus ?: "NONE",
+                            isConnected = existingPeer?.isConnected ?: false,
+                            latitude = existingPeer?.latitude,
+                            longitude = existingPeer?.longitude,
+                            lastDistanceMeters = existingPeer?.lastDistanceMeters
+                        )
+                    )
+
+                    cachedPeerAvatars.remove(oldName)
+                    cachedPeerAvatars[newName] = finalAvatar
+
+                    db.messageDao().migrateSenderName(oldName, newName)
+                    db.messageDao().migrateReceiverName(oldName, newName)
+
+                    if (epId.isNotEmpty()) {
+                        pendingConnections[epId] = newName
+                        nearbyMeshTransport?.updatePeerMapping(epId, oldName, newName)
+                    }
+                    routingEngine?.updatePeerDestination(oldName, newName)
+
+                    withContext(Dispatchers.Main) {
+                        if (currentChatPeerName == oldName) {
+                            currentChatPeerName = newName
+                            findViewById<TextView>(R.id.chatHeader).text = newName
+                            AvatarManager.loadAvatar(chatPeerAvatar, finalAvatar)
+                        }
+                        emitAlert("PROFILE", "NAME CHANGED", "$oldName is now known as $newName", newName)
+                        loadPeersFromDb()
+                        loadRecentActivityFromDb()
+                        loadConnectionsFromDb()
+                        if (currentChatPeerName == newName) {
+                            val history = db.messageDao().getChatHistory(myNickName, newName)
+                            updateChatUI(history)
+                        }
+                    }
+                }
+                return@launch
+            }
+
+            // Peer Profile Sync Announcement
+            if (decryptedBody.startsWith("[PEER_PROFILE]:")) {
+                val clean = decryptedBody.removePrefix("[PEER_PROFILE]:")
+                val parts = clean.split("|")
+                if (parts.size >= 4) {
+                    val peerDeviceId = parts[0]
+                    val peerNick = parts[1]
+                    val peerAvatar = parts[2]
+                    val peerVersion = parts[3].toLongOrNull() ?: 1L
+                    Log.i(TAG, "PEER_PROFILE_RECEIVED: device=$peerDeviceId nick=$peerNick avatar=$peerAvatar ver=$peerVersion")
+
+                    if (peerNick.isNotBlank()) {
+                        cachedPeerAvatars[peerNick] = peerAvatar
+                        val existing = db.peerDao().getPeerByName(peerNick)
+                            ?: (if (peerDeviceId.isNotBlank()) db.peerDao().getPeerByDeviceId(peerDeviceId) else null)
+
+                        if (existing != null) {
+                            if (peerVersion >= existing.profileVersion) {
+                                if (existing.name != peerNick) {
+                                    db.peerDao().deletePeerByName(existing.name)
+                                    db.messageDao().migrateSenderName(existing.name, peerNick)
+                                    db.messageDao().migrateReceiverName(existing.name, peerNick)
+                                    db.peerDao().insertPeer(
+                                        existing.copy(
+                                            name = peerNick,
+                                            avatarId = peerAvatar,
+                                            profileVersion = peerVersion
+                                        )
+                                    )
+                                } else {
+                                    db.peerDao().updatePeerProfile(existing.name, peerAvatar, peerVersion)
+                                }
+                            }
+                        } else {
+                            val epId = if (activeEndpoints.contains(sourceEndpointOrPeer)) sourceEndpointOrPeer else ""
+                            db.peerDao().insertPeer(
+                                PeerEntity(
+                                    name = peerNick,
+                                    endpointId = epId,
+                                    lastSeenTimestamp = System.currentTimeMillis(),
+                                    isOnline = epId.isNotEmpty(),
+                                    nextHop = peerNick,
+                                    hopDistance = 1,
+                                    isReachable = true,
+                                    deviceId = peerDeviceId,
+                                    avatarId = peerAvatar,
+                                    profileVersion = peerVersion,
+                                    connectionStatus = "NONE",
+                                    isConnected = false
+                                )
+                            )
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            loadPeersFromDb()
+                            loadConnectionsFromDb()
+                            loadRecentActivityFromDb()
+                            loadAlertsFromDb()
+                            if (currentChatPeerName == peerNick) {
+                                AvatarManager.loadAvatar(chatPeerAvatar, peerAvatar)
+                            }
+                        }
+                    }
+                }
+                return@launch
+            }
+
+            // Connection Request
+            if (decryptedBody.startsWith("[CONN_REQ]:")) {
+                val clean = decryptedBody.removePrefix("[CONN_REQ]:")
+                val parts = clean.split("|")
+                if (parts.isNotEmpty()) {
+                    val peerDeviceId = parts.getOrNull(0) ?: ""
+                    val senderNick = parts.getOrNull(1) ?: senderName
+                    val senderAvatar = parts.getOrNull(2) ?: AvatarManager.DEFAULT_AVATAR_ID
+                    Log.i(TAG, "CONN_REQ_RECEIVED: from=$senderNick device=$peerDeviceId avatar=$senderAvatar")
+
+                    if (senderNick != myNickName) {
+                        cachedPeerAvatars[senderNick] = senderAvatar
+                        val existing = db.peerDao().getPeerByName(senderNick)
+                            ?: (if (peerDeviceId.isNotBlank()) db.peerDao().getPeerByDeviceId(peerDeviceId) else null)
+
+                        if (existing != null) {
+                            db.peerDao().updateConnectionStatus(existing.name, "REQUEST_RECEIVED", false)
+                            db.peerDao().updatePeerAvatar(existing.name, senderAvatar)
+                        } else {
+                            val epId = if (activeEndpoints.contains(sourceEndpointOrPeer)) sourceEndpointOrPeer else ""
+                            db.peerDao().insertPeer(
+                                PeerEntity(
+                                    name = senderNick,
+                                    endpointId = epId,
+                                    lastSeenTimestamp = System.currentTimeMillis(),
+                                    isOnline = epId.isNotEmpty(),
+                                    nextHop = senderNick,
+                                    hopDistance = 1,
+                                    isReachable = true,
+                                    deviceId = peerDeviceId,
+                                    avatarId = senderAvatar,
+                                    connectionStatus = "REQUEST_RECEIVED",
+                                    isConnected = false
+                                )
+                            )
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            emitAlert("CONNECTION", "REQUEST", "Connection request from $senderNick", senderNick)
+                            loadConnectionsFromDb()
+                            loadPeersFromDb()
+                        }
+                    }
+                }
+                return@launch
+            }
+
+            // Connection Response
+            if (decryptedBody.startsWith("[CONN_RESP]:")) {
+                val clean = decryptedBody.removePrefix("[CONN_RESP]:")
+                val parts = clean.split("|")
+                if (parts.isNotEmpty()) {
+                    val peerDeviceId = parts.getOrNull(0) ?: ""
+                    val senderNick = parts.getOrNull(1) ?: senderName
+                    val senderAvatar = parts.getOrNull(2) ?: AvatarManager.DEFAULT_AVATAR_ID
+                    val action = parts.getOrNull(3) ?: "ACCEPT"
+                    Log.i(TAG, "CONN_RESP_RECEIVED: from=$senderNick action=$action")
+
+                    cachedPeerAvatars[senderNick] = senderAvatar
+                    val existing = db.peerDao().getPeerByName(senderNick)
+                        ?: (if (peerDeviceId.isNotBlank()) db.peerDao().getPeerByDeviceId(peerDeviceId) else null)
+
+                    val isAccepted = action.equals("ACCEPT", ignoreCase = true)
+                    val newStatus = if (isAccepted) "CONNECTED" else "NONE"
+
+                    if (existing != null) {
+                        db.peerDao().updateConnectionStatus(existing.name, newStatus, isAccepted)
+                        db.peerDao().updatePeerAvatar(existing.name, senderAvatar)
+                    } else {
+                        val epId = if (activeEndpoints.contains(sourceEndpointOrPeer)) sourceEndpointOrPeer else ""
+                        db.peerDao().insertPeer(
+                            PeerEntity(
+                                name = senderNick,
+                                endpointId = epId,
+                                lastSeenTimestamp = System.currentTimeMillis(),
+                                isOnline = epId.isNotEmpty(),
+                                nextHop = senderNick,
+                                hopDistance = 1,
+                                isReachable = true,
+                                deviceId = peerDeviceId,
+                                avatarId = senderAvatar,
+                                connectionStatus = newStatus,
+                                isConnected = isAccepted
+                            )
+                        )
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (isAccepted) {
+                            emitAlert("CONNECTION", "CONNECTED", "$senderNick accepted your connection request", senderNick)
+                        } else {
+                            emitAlert("CONNECTION", "INFO", "$senderNick declined your connection request", senderNick)
+                        }
+                        loadConnectionsFromDb()
+                        loadPeersFromDb()
+                    }
+                }
+                return@launch
+            }
+
+            // Peer Handshake
+            if (decryptedBody.startsWith("[PEER_HELLO]:")) {
+                val clean = decryptedBody.removePrefix("[PEER_HELLO]:")
+                val parts = clean.split("|")
+                if (parts.size >= 2) {
+                    val peerDeviceId = parts[0]
+                    val remoteNick = parts[1]
+                    val peerAvatar = parts.getOrNull(2) ?: AvatarManager.DEFAULT_AVATAR_ID
+                    val peerVersion = parts.getOrNull(3)?.toLongOrNull() ?: 1L
+                    Log.i(TAG, "PEER_HELLO_RECEIVED: device=$peerDeviceId nick=$remoteNick avatar=$peerAvatar ver=$peerVersion from=$sourceEndpointOrPeer")
+
+                    cachedPeerAvatars[remoteNick] = peerAvatar
+
+                    var existing = if (peerDeviceId.isNotBlank()) db.peerDao().getPeerByDeviceId(peerDeviceId) else null
+                    if (existing == null) {
+                        existing = db.peerDao().getPeerByName(remoteNick)
+                    }
+
+                    if (existing != null && existing.name != remoteNick) {
+                        Log.i(TAG, "Device $peerDeviceId changed name from ${existing.name} to $remoteNick")
+                        db.peerDao().deletePeerByName(existing.name)
+                        db.messageDao().migrateSenderName(existing.name, remoteNick)
+                        db.messageDao().migrateReceiverName(existing.name, remoteNick)
+                        if (activeEndpoints.contains(sourceEndpointOrPeer)) {
+                            pendingConnections[sourceEndpointOrPeer] = remoteNick
+                            nearbyMeshTransport?.updatePeerMapping(sourceEndpointOrPeer, existing.name, remoteNick)
+                        }
+                        routingEngine?.updatePeerDestination(existing.name, remoteNick)
+                    }
+
+                    val epId = if (activeEndpoints.contains(sourceEndpointOrPeer)) sourceEndpointOrPeer else (existing?.endpointId ?: "")
+                    db.peerDao().insertPeer(
+                        PeerEntity(
+                            name = remoteNick,
+                            endpointId = epId,
+                            lastSeenTimestamp = System.currentTimeMillis(),
+                            isOnline = epId.isNotEmpty() && activeEndpoints.contains(epId),
+                            nextHop = remoteNick,
+                            hopDistance = 1,
+                            isReachable = true,
+                            deviceId = peerDeviceId,
+                            avatarId = peerAvatar,
+                            profileVersion = peerVersion,
+                            connectionStatus = existing?.connectionStatus ?: "NONE",
+                            isConnected = existing?.isConnected ?: false,
+                            latitude = existing?.latitude,
+                            longitude = existing?.longitude,
+                            lastDistanceMeters = existing?.lastDistanceMeters
+                        )
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        loadPeersFromDb()
+                        loadConnectionsFromDb()
+                        if (currentChatPeerName == remoteNick) {
+                            AvatarManager.loadAvatar(chatPeerAvatar, peerAvatar)
+                            updateStatus("CONNECTED")
+                            chatStatusText.text = "● Connected"
+                            chatStatusText.setTextColor(Color.parseColor("#16A34A"))
+                            btnConnectChat.visibility = View.GONE
+                        }
+                    }
+                }
+                return@launch
+            }
+
             // 1. Alert Reply
             if (decryptedBody.startsWith("[ALERT_REPLY]:")) {
                 val clean = decryptedBody.removePrefix("[ALERT_REPLY]:")
@@ -1610,10 +2784,32 @@ class MainActivity : AppCompatActivity() {
                 val clean = decryptedBody.removePrefix("[BLOB_DATA]:")
                 val parts = clean.split("|")
                 val hash = parts[0].trim().lowercase()
+                if (completedBlobHashes.contains(hash)) return@launch
                 val base64 = if (parts.size > 1) parts[1] else ""
                 val bytes = try { Base64.decode(base64, Base64.DEFAULT) } catch (_: Exception) { null }
                 if (bytes != null) {
-                    blobExchange?.onReceivedBytes(hash, bytes, senderName)
+                    val success = blobExchange?.onReceivedBytes(hash, bytes, senderName) ?: false
+                    if (success) {
+                        completedBlobHashes.add(hash)
+                    } else {
+                        Log.e(TAG, "Hash verification or storage failed for blob: hash=$hash")
+                        val affectedMsgs = db.messageDao().getAllFileMessages().filter { it.text.contains(hash) && it.transferStatus == "RECEIVING" }
+                        for (m in affectedMsgs) {
+                            val failedText = m.text.replace("|RECEIVING", "|FAILED")
+                            db.messageDao().updateFileDetails(m.id.toLong(), failedText, m.localPath ?: "", "FAILED", m.fileSize)
+                        }
+                        withContext(Dispatchers.Main) {
+                            for (m in affectedMsgs) {
+                                val failedText = m.text.replace("|RECEIVING", "|FAILED")
+                                chatAdapter.updateAttachmentStatus(m.id.toLong(), failedText, m.localPath ?: "", "FAILED")
+                                alertThreadAdapter.updateAttachmentStatus(m.id.toLong(), failedText, m.localPath ?: "", "FAILED")
+                            }
+                            if (currentChatPeerName != null) {
+                                val history = db.messageDao().getChatHistory(myNickName, currentChatPeerName!!)
+                                updateChatUI(history)
+                            }
+                        }
+                    }
                 }
                 return@launch
             }
@@ -1622,6 +2818,7 @@ class MainActivity : AppCompatActivity() {
                 val clean = decryptedBody.removePrefix("[BLOB_CHUNK]:")
                 val parts = clean.split("|")
                 val hash = parts.getOrNull(0)?.trim()?.lowercase() ?: ""
+                if (hash.isNotBlank() && completedBlobHashes.contains(hash)) return@launch
                 val chunkIndex = parts.getOrNull(1)?.toIntOrNull() ?: 0
                 val totalChunks = parts.getOrNull(2)?.toIntOrNull() ?: 1
                 val base64Chunk = parts.getOrNull(3) ?: ""
@@ -1640,20 +2837,46 @@ class MainActivity : AppCompatActivity() {
                             val msg = db.messageDao().getAllFileMessages().firstOrNull { it.text.contains(hash) }
                             if (msg != null) {
                                 chatAdapter.updateTransferProgress(msg.id, progressPercent)
+                                alertThreadAdapter.updateTransferProgress(msg.id, progressPercent)
                             }
                         }
                     }
 
                     if (chunkMap.size == totalChunks) {
-                        Log.d(TAG, "TIMING_METRIC: [5] all chunks received: hash=$hash totalChunks=$totalChunks")
-                        val totalEstimatedBytes = totalChunks * 20480
-                        val baos = java.io.ByteArrayOutputStream(totalEstimatedBytes)
-                        for (i in 0 until totalChunks) {
-                            chunkMap[i]?.let { baos.write(it) }
+                        val allPresent = (0 until totalChunks).all { chunkMap.containsKey(it) }
+                        if (allPresent) {
+                            Log.d(TAG, "TIMING_METRIC: [5] all chunks received: hash=$hash totalChunks=$totalChunks")
+                            val totalEstimatedBytes = totalChunks * 20480
+                            val baos = java.io.ByteArrayOutputStream(totalEstimatedBytes)
+                            for (i in 0 until totalChunks) {
+                                chunkMap[i]?.let { baos.write(it) }
+                            }
+                            pendingBlobChunks.remove(hash)
+                            val assembled = baos.toByteArray()
+                            Log.d(TAG, "TIMING_METRIC: [6] blob verifying: hash=$hash bytes=${assembled.size}")
+                            val success = blobExchange?.onReceivedBytes(hash, assembled, senderName) ?: false
+                            if (success) {
+                                completedBlobHashes.add(hash)
+                            } else {
+                                Log.e(TAG, "Hash verification or storage failed for blob: hash=$hash")
+                                val affectedMsgs = db.messageDao().getAllFileMessages().filter { it.text.contains(hash) && it.transferStatus == "RECEIVING" }
+                                for (m in affectedMsgs) {
+                                    val failedText = m.text.replace("|RECEIVING", "|FAILED")
+                                    db.messageDao().updateFileDetails(m.id.toLong(), failedText, m.localPath ?: "", "FAILED", m.fileSize)
+                                }
+                                withContext(Dispatchers.Main) {
+                                    for (m in affectedMsgs) {
+                                        val failedText = m.text.replace("|RECEIVING", "|FAILED")
+                                        chatAdapter.updateAttachmentStatus(m.id.toLong(), failedText, m.localPath ?: "", "FAILED")
+                                        alertThreadAdapter.updateAttachmentStatus(m.id.toLong(), failedText, m.localPath ?: "", "FAILED")
+                                    }
+                                    if (currentChatPeerName != null) {
+                                        val history = db.messageDao().getChatHistory(myNickName, currentChatPeerName!!)
+                                        updateChatUI(history)
+                                    }
+                                }
+                            }
                         }
-                        pendingBlobChunks.remove(hash)
-                        Log.d(TAG, "TIMING_METRIC: [6] blob verifying: hash=$hash bytes=${baos.size()}")
-                        blobExchange?.onReceivedBytes(hash, baos.toByteArray(), senderName)
                     }
                 }
                 return@launch
@@ -1827,11 +3050,20 @@ class MainActivity : AppCompatActivity() {
                 val fileSize = parts.getOrNull(3)?.toLongOrNull() ?: 0L
                 val wireStatus = parts.getOrNull(4) ?: "RECEIVING"
                 val mimeType = parts.getOrNull(5) ?: (if (FileStorageManager.isImageFile(fileName)) "image/*" else "*/*")
-                val attachmentKey = parts.getOrNull(6)
+                val rawKey = parts.getOrNull(6)
+                val attachmentKey = rawKey?.takeIf { it.isNotBlank() && it != "null" }
+                val keySuffix = if (attachmentKey != null) "|$attachmentKey" else ""
                 val msgType = if (FileStorageManager.isImageFile(fileName)) "IMAGE" else "FILE"
 
-                val payloadId = hashOrPayloadId?.toLongOrNull()
-                val completedFile = if (payloadId != null) pendingCompletedFilesMap.remove(payloadId) else null
+                val wirePayloadId = parts.getOrNull(7)?.toLongOrNull()
+                val payloadId = wirePayloadId ?: hashOrPayloadId?.toLongOrNull()
+                val completedFile = if (payloadId != null) {
+                    pendingCompletedFilesMap.remove(payloadId)
+                } else if (!hashOrPayloadId.isNullOrBlank()) {
+                    val key = pendingCompletedFilesMap.entries.firstOrNull { it.value.hash.equals(hashOrPayloadId, ignoreCase = true) }?.key
+                    if (key != null) pendingCompletedFilesMap.remove(key) else null
+                } else null
+                val isDirectNeighbor = activeEndpoints.any { pendingConnections[it] == senderName || it == sourceEndpointOrPeer }
 
                 val textBody: String
                 val savedPath: String?
@@ -1841,19 +3073,43 @@ class MainActivity : AppCompatActivity() {
                     savedPath = completedFile.file.absolutePath
                     status = "SUCCESS"
                     val finalHash = completedFile.hash.ifBlank { hashOrPayloadId ?: "" }
-                    textBody = "[FILE]:$fileName|$savedPath|$finalHash|${completedFile.file.length()}|SUCCESS|$mimeType|$attachmentKey"
+                    FileStorageManager.saveToPublicDownloads(this@MainActivity, completedFile.file, fileName)
+                    textBody = "[FILE]:$fileName|$savedPath|$finalHash|${completedFile.file.length()}|SUCCESS|$mimeType$keySuffix"
+                } else if (!hashOrPayloadId.isNullOrBlank() && MeshBlobStore.has(this@MainActivity, hashOrPayloadId)) {
+                    val readableFile = MeshBlobStore.exportReadableFile(this@MainActivity, hashOrPayloadId, fileName, attachmentKey)
+                        ?: MeshBlobStore.getFile(this@MainActivity, hashOrPayloadId)
+                    savedPath = readableFile?.absolutePath
+                    status = "SUCCESS"
+                    readableFile?.let { FileStorageManager.saveToPublicDownloads(this@MainActivity, it, fileName) }
+                    textBody = "[FILE]:$fileName|$savedPath|$hashOrPayloadId|$fileSize|SUCCESS|$mimeType$keySuffix"
                 } else if (!hashOrPayloadId.isNullOrBlank() && blobRepository.has(hashOrPayloadId)) {
                     val blobFile = blobRepository.getFile(hashOrPayloadId)
                     savedPath = blobFile?.absolutePath
                     status = "SUCCESS"
-                    textBody = "[FILE]:$fileName|$savedPath|$hashOrPayloadId|$fileSize|SUCCESS|$mimeType|$attachmentKey"
+                    blobFile?.let { FileStorageManager.saveToPublicDownloads(this@MainActivity, it, fileName) }
+                    textBody = "[FILE]:$fileName|$savedPath|$hashOrPayloadId|$fileSize|SUCCESS|$mimeType$keySuffix"
                 } else {
-                    savedPath = incomingPath
-                    status = "RECEIVING"
-                    textBody = "[FILE]:$fileName||$hashOrPayloadId|$fileSize|RECEIVING|$mimeType|$attachmentKey"
-                    if (!hashOrPayloadId.isNullOrBlank() && hashOrPayloadId.length >= 8) {
-                        blobExchange?.want(hashOrPayloadId, senderName)
-                        blobExchange?.registerCustodyHash(hashOrPayloadId, senderName)
+                    val candidate = FileStorageManager.getStorageDir(this@MainActivity).listFiles()
+                        ?.firstOrNull {
+                            it.name.endsWith(fileName) && it.length() > 0L &&
+                            (hashOrPayloadId.isNullOrBlank() || MeshBlobStore.computeSha256(it).equals(hashOrPayloadId, ignoreCase = true))
+                        }
+                    if (candidate != null) {
+                        savedPath = candidate.absolutePath
+                        status = "SUCCESS"
+                        val finalHash = hashOrPayloadId ?: ""
+                        FileStorageManager.saveToPublicDownloads(this@MainActivity, candidate, fileName)
+                        textBody = "[FILE]:$fileName|$savedPath|$finalHash|${candidate.length()}|SUCCESS|$mimeType$keySuffix"
+                    } else {
+                        savedPath = incomingPath
+                        status = "RECEIVING"
+                        textBody = "[FILE]:$fileName||$hashOrPayloadId|$fileSize|RECEIVING|$mimeType$keySuffix"
+                        if (!hashOrPayloadId.isNullOrBlank() && hashOrPayloadId.length >= 8) {
+                            if (payloadId == null || !isDirectNeighbor) {
+                                blobExchange?.want(hashOrPayloadId, senderName)
+                                blobExchange?.registerCustodyHash(hashOrPayloadId, senderName)
+                            }
+                        }
                     }
                 }
 
@@ -1889,7 +3145,8 @@ class MainActivity : AppCompatActivity() {
                         alertId = null,
                         fileName = fileName,
                         senderName = senderName,
-                        endpointId = sourceEndpointOrPeer
+                        endpointId = sourceEndpointOrPeer,
+                        hash = hashOrPayloadId ?: ""
                     )
                 } else if (status == "SUCCESS") {
                     emitAlert("TRANSFER", "FILE RECEIVED", "$fileName received successfully", senderName)
@@ -1910,33 +3167,75 @@ class MainActivity : AppCompatActivity() {
                 val isLive = decryptedBody.startsWith("[LOC_LIVE]:")
                 val clean = if (isLive) decryptedBody.removePrefix("[LOC_LIVE]:") else decryptedBody.removePrefix("[LOC]:")
                 val parts = clean.split("|")
-                val lat = parts.getOrNull(0)?.toDoubleOrNull()
-                val lon = parts.getOrNull(1)?.toDoubleOrNull()
-                val label = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: (if (isLive) "Live GPS" else "GPS Location")
+                val lat: Double?
+                val lon: Double?
+                val peerTimestamp: Long
+                val peerAccuracy: Float
+                val label: String
+
+                if (isLive) {
+                    lat = parts.getOrNull(1)?.toDoubleOrNull()
+                    lon = parts.getOrNull(2)?.toDoubleOrNull()
+                    peerTimestamp = parts.getOrNull(3)?.toLongOrNull() ?: timestamp
+                    peerAccuracy = parts.getOrNull(4)?.toFloatOrNull() ?: 0f
+                    label = "Live GPS"
+                } else {
+                    lat = parts.getOrNull(0)?.toDoubleOrNull()
+                    lon = parts.getOrNull(1)?.toDoubleOrNull()
+                    if (parts.size >= 4 && parts[3].toFloatOrNull() != null) {
+                        peerTimestamp = parts.getOrNull(2)?.toLongOrNull() ?: timestamp
+                        peerAccuracy = parts.getOrNull(3)?.toFloatOrNull() ?: 0f
+                        label = parts.getOrNull(4)?.takeIf { it.isNotBlank() } ?: "Current Location"
+                    } else {
+                        peerTimestamp = timestamp
+                        peerAccuracy = 0f
+                        label = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "GPS Location"
+                    }
+                }
 
                 if (lat != null && lon != null) {
-                    val currentMeters = myCurrentCoordinates?.let { myLoc ->
-                        com.fury.peerconnect.logic.DistanceEngine.calculateHaversineDistance(
-                            myLoc.latitude, myLoc.longitude, lat, lon
-                        )
-                    }
-                    if (currentMeters != null && currentMeters > MAX_DIRECT_P2P_DISTANCE_METERS) {
-                        Log.w(TAG, "[DISTANCE_EXCEEDED] Peer $senderName is ${currentMeters.toInt()}m away (max direct limit ${MAX_DIRECT_P2P_DISTANCE_METERS.toInt()}m).")
-                        val directEp = activeEndpoints.firstOrNull { pendingConnections[it] == senderName }
-                        if (directEp != null) {
-                            Log.w(TAG, "[DISTANCE_EXCEEDED] Disconnecting direct endpoint $directEp for out-of-range peer $senderName")
-                            handleExplicitDisconnect(directEp)
+                    val myLoc = myCurrentCoordinates
+                    val isLocalAccOk = myLoc != null && com.fury.peerconnect.logic.DistanceEngine.isAccuracyAcceptable(myLoc.accuracy)
+                    val isPeerAccOk = com.fury.peerconnect.logic.DistanceEngine.isAccuracyAcceptable(peerAccuracy)
+
+                    val distanceStr: String?
+                    if (myLoc != null) {
+                        if (isLocalAccOk && isPeerAccOk) {
+                            val currentMeters = com.fury.peerconnect.logic.DistanceEngine.calculateHaversineDistance(
+                                myLoc.latitude, myLoc.longitude, lat, lon
+                            )
+                            db.peerDao().updatePeerLocation(senderName, lat, lon, currentMeters)
+                            distanceStr = com.fury.peerconnect.logic.DistanceEngine.formatDistance(currentMeters)
+                            if (currentMeters > MAX_DIRECT_P2P_DISTANCE_METERS) {
+                                Log.w(TAG, "[DISTANCE_EXCEEDED] Peer $senderName is ${currentMeters.toInt()}m away (max direct limit ${MAX_DIRECT_P2P_DISTANCE_METERS.toInt()}m).")
+                                val directEp = activeEndpoints.firstOrNull { pendingConnections[it] == senderName }
+                                if (directEp != null) {
+                                    Log.w(TAG, "[DISTANCE_EXCEEDED] Disconnecting direct endpoint $directEp for out-of-range peer $senderName")
+                                    handleExplicitDisconnect(directEp)
+                                }
+                            }
+                        } else {
+                            db.peerDao().updatePeerLocation(senderName, lat, lon, null)
+                            distanceStr = "Refining GPS…"
                         }
+                    } else {
+                        db.peerDao().updatePeerLocation(senderName, lat, lon, null)
+                        distanceStr = null
                     }
 
                     withContext(Dispatchers.Main) {
-                        val distanceStr = currentMeters?.let { com.fury.peerconnect.logic.DistanceEngine.formatDistance(it) }
-                        val statusLabel = if (distanceStr != null) "Received just now · $distanceStr" else "Received just now"
+                        val statusLabel = when {
+                            distanceStr == "Refining GPS…" -> "Refining GPS… (±${peerAccuracy.toInt()}m)"
+                            distanceStr != null -> "Received just now · $distanceStr"
+                            else -> "Received just now"
+                        }
                         offlineMapManager?.updatePeerLocation(
                             peerId = senderName,
                             peerName = senderName,
                             latitude = lat,
                             longitude = lon,
+                            accuracy = peerAccuracy,
+                            timestamp = peerTimestamp,
                             isLive = isLive,
                             lastUpdatedText = statusLabel
                         )
@@ -2184,12 +3483,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSettingsUI() {
         settingsDisplayName.text = if (myNickName.isNotEmpty()) myNickName else "Peer"
-        settingsAvatar.text = if (myNickName.isNotEmpty()) myNickName.take(1).uppercase(Locale.ROOT) else "N"
+        AvatarManager.loadAvatar(settingsAvatar, UserManager(this).getAvatarId())
         val endpointSuffix = activeEndpoints.firstOrNull()?.let { " · Endpoint: $it" } ?: ""
         settingsPeerId.text = "Local NEXORA Node$endpointSuffix"
         val isLive = activeEndpoints.isNotEmpty()
         settingsStatusBadge.text = if (isLive) "● Direct Mesh Active (${activeEndpoints.size} peers)" else "● Node Online (Autonomous)"
         settingsStatusBadge.setTextColor(Color.parseColor(if (isLive) "#16A34A" else "#0284C7"))
+        loadConnectionsFromDb()
     }
 
     private fun checkLocationAndRun(action: () -> Unit) {
@@ -2227,6 +3527,35 @@ class MainActivity : AppCompatActivity() {
             textAlertLocationStatus.text = "Acquiring GPS location..."
         }
 
+        val radioGroupAlertType = dialogView.findViewById<RadioGroup>(R.id.radioGroupAlertType)
+        val radioStandardSos = dialogView.findViewById<RadioButton>(R.id.radioStandardSos)
+        val radioCriticalEmergency = dialogView.findViewById<RadioButton>(R.id.radioCriticalEmergency)
+        val layoutCriticalOptions = dialogView.findViewById<View>(R.id.layoutCriticalOptions)
+        val spinnerCriticalCategory = dialogView.findViewById<Spinner>(R.id.spinnerCriticalCategory)
+        val spinnerCriticalRadius = dialogView.findViewById<Spinner>(R.id.spinnerCriticalRadius)
+
+        val categories = EmergencyCategory.values().map { it.name.replace("_", " ") }
+        val categoryAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
+        spinnerCriticalCategory.adapter = categoryAdapter
+
+        val radiusOptions = listOf("500m", "1km", "2km", "5km", "Area-wide")
+        val radiusAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, radiusOptions)
+        spinnerCriticalRadius.adapter = radiusAdapter
+
+        radioGroupAlertType.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == R.id.radioCriticalEmergency) {
+                layoutCriticalOptions.visibility = View.VISIBLE
+                if (btnSendAlert is com.google.android.material.button.MaterialButton) {
+                    btnSendAlert.text = "🚨 Broadcast Critical Alert"
+                }
+            } else {
+                layoutCriticalOptions.visibility = View.GONE
+                if (btnSendAlert is com.google.android.material.button.MaterialButton) {
+                    btnSendAlert.text = "Broadcast SOS Alert"
+                }
+            }
+        }
+
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
@@ -2240,37 +3569,101 @@ class MainActivity : AppCompatActivity() {
             alertFilePickerLauncher.launch(intent)
         }
         btnSendAlert.setOnClickListener {
-            val desc = editAlertDesc.text.toString().trim()
-            if (desc.isEmpty()) {
-                Toast.makeText(this, "Please enter an alert description", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val shouldAttachGps = checkAttachLocation.isChecked
-            if (shouldAttachGps) {
-                lifecycleScope.launch {
-                    val coords = myCurrentCoordinates ?: locationManagerHelper.getCurrentLocation()
-                    if (coords == null) {
-                        AlertDialog.Builder(this@MainActivity)
-                            .setTitle("GPS Unavailable")
-                            .setMessage("GPS coordinates are currently unavailable. Do you want to broadcast this SOS alert without location coordinates?")
-                            .setPositiveButton("Send Without GPS") { _, _ ->
-                                dialog.dismiss()
-                                createAndBroadcastAlert(desc, pendingAlertAttachmentUri, pendingAlertAttachmentName, attachLocation = false)
-                            }
-                            .setNegativeButton("Wait for GPS", null)
-                            .show()
-                    } else {
-                        dialog.dismiss()
-                        createAndBroadcastAlert(desc, pendingAlertAttachmentUri, pendingAlertAttachmentName, attachLocation = true)
-                    }
-                }
+            val rawDesc = editAlertDesc.text.toString().trim()
+            val isCritical = radioCriticalEmergency.isChecked
+            val selectedCategory = if (isCritical) {
+                EmergencyCategory.values().getOrNull(spinnerCriticalCategory.selectedItemPosition) ?: EmergencyCategory.OTHER
+            } else null
+
+            val desc = if (rawDesc.isNotEmpty()) {
+                rawDesc
+            } else if (isCritical && selectedCategory != null) {
+                "${selectedCategory.name.replace("_", " ")} Emergency"
             } else {
-                dialog.dismiss()
-                createAndBroadcastAlert(desc, pendingAlertAttachmentUri, pendingAlertAttachmentName, attachLocation = false)
+                "SOS Emergency Alert"
+            }
+
+            val selectedRadiusMeters = if (isCritical) {
+                when (spinnerCriticalRadius.selectedItemPosition) {
+                    0 -> 500.0
+                    1 -> 1000.0
+                    2 -> 2000.0
+                    3 -> 5000.0
+                    else -> null
+                }
+            } else null
+
+            dialog.dismiss()
+            Toast.makeText(this, if (isCritical) "🚨 Broadcasting Critical Emergency..." else "Broadcasting SOS Alert...", Toast.LENGTH_SHORT).show()
+
+            val shouldAttachGps = checkAttachLocation.isChecked
+            lifecycleScope.launch(Dispatchers.IO) {
+                val coords = if (shouldAttachGps) {
+                    myCurrentCoordinates ?: try {
+                        withTimeoutOrNull(2000L) {
+                            locationManagerHelper.getCurrentLocation()
+                        }
+                    } catch (_: Exception) { null }
+                } else null
+
+                if (isCritical && selectedCategory != null) {
+                    broadcastCriticalEmergency(
+                        desc = desc,
+                        category = selectedCategory,
+                        radiusMeters = selectedRadiusMeters,
+                        latitude = coords?.latitude,
+                        longitude = coords?.longitude,
+                        accuracy = coords?.accuracy,
+                        uri = pendingAlertAttachmentUri,
+                        fileName = pendingAlertAttachmentName
+                    )
+                } else {
+                    createAndBroadcastAlert(
+                        desc = desc,
+                        uri = pendingAlertAttachmentUri,
+                        fileName = pendingAlertAttachmentName,
+                        attachLocation = coords != null
+                    )
+                }
             }
         }
         btnCancelCreateAlert.setOnClickListener { dialog.dismiss() }
         dialog.show()
+    }
+
+    private fun broadcastCriticalEmergency(
+        desc: String,
+        category: EmergencyCategory,
+        radiusMeters: Double?,
+        latitude: Double?,
+        longitude: Double?,
+        accuracy: Float?,
+        uri: Uri?,
+        fileName: String?
+    ) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val mgr = criticalAlertManager ?: getOrCreateCriticalAlertManager()
+                mgr.createAndBroadcastCriticalAlert(
+                    category = category,
+                    title = "${category.name.replace("_", " ")} Emergency",
+                    message = desc,
+                    radiusMeters = radiusMeters,
+                    latitude = latitude,
+                    longitude = longitude,
+                    accuracy = accuracy,
+                    attachmentUri = uri,
+                    attachmentFileName = fileName
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in createAndBroadcastCriticalAlert", e)
+            }
+            withContext(Dispatchers.Main) {
+                loadAlertsFromDb()
+                alertsRecyclerView.scrollToPosition(0)
+                Toast.makeText(this@MainActivity, "🚨 Critical Alert Broadcasted!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun createAndBroadcastAlert(
@@ -2375,15 +3768,29 @@ class MainActivity : AppCompatActivity() {
             val hasLocation = alert.latitude != null && alert.longitude != null
             Log.i(TAG, "ALERT_LOCATION_DB_READ: alertId=${alert.alertId}, hasLocation=$hasLocation, latitude=${alert.latitude}, longitude=${alert.longitude}, accuracy=${alert.accuracy}")
 
+            val isCritical = alert.type == "CRITICAL_EMERGENCY" ||
+                (alert.severity != null && alert.severity.equals("CRITICAL", ignoreCase = true))
+
             if (!alert.isRead) {
                 db.alertDao().updateAlert(alert.copy(isRead = true))
                 loadAlertsFromDb()
             }
             withContext(Dispatchers.Main) {
                 currentAlertThreadId = alert.alertId ?: alert.id.toString()
-                alertThreadHeader.text = alert.title
+                alertThreadHeader.text = if (isCritical) "🚨 ${alert.title}" else alert.title
                 val isFromMe = alert.originPeerId == myNickName || alert.peerName == myNickName
                 alertThreadSenderText.text = if (isFromMe) "From: You (Broadcast)" else "From: ${alert.peerName ?: "Unknown"}"
+                if (isCritical) {
+                    alertThreadSenderText.setTextColor(Color.parseColor("#DC2626"))
+                    alertThreadOriginalCard.strokeColor = Color.parseColor("#DC2626")
+                    alertThreadOriginalCard.strokeWidth = (2 * resources.displayMetrics.density).toInt()
+                    alertThreadOriginalCard.setCardBackgroundColor(Color.parseColor("#15DC2626"))
+                } else {
+                    alertThreadSenderText.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.nexora_text_secondary))
+                    alertThreadOriginalCard.strokeColor = ContextCompat.getColor(this@MainActivity, R.color.nexora_red_border)
+                    alertThreadOriginalCard.strokeWidth = (1 * resources.displayMetrics.density).toInt()
+                    alertThreadOriginalCard.setCardBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.nexora_red_soft))
+                }
                 alertThreadDescription.text = alert.body
 
                 bindAlertAttachment(alert)
@@ -2579,10 +3986,56 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val alerts = db.alertDao().getAllAlerts()
             withContext(Dispatchers.Main) {
+                if (!::alertAdapter.isInitialized || !::alertsRecyclerView.isInitialized) {
+                    return@withContext
+                }
                 alertAdapter.setAlerts(alerts)
-                textEmptyAlerts.visibility = if (alerts.isEmpty()) View.VISIBLE else View.GONE
+                updateAlertsEmptyState(alertAdapter.getCurrentFilter(), alertAdapter.getDisplayedCount())
+                if (alertAdapter.getDisplayedCount() > 0) {
+                    alertsRecyclerView.scrollToPosition(0)
+                }
             }
         }
+    }
+
+    private fun updateAlertsEmptyState(filter: String, displayedCount: Int) {
+        if (displayedCount == 0) {
+            textEmptyAlerts.visibility = View.VISIBLE
+            alertsRecyclerView.visibility = View.GONE
+            if (filter == "CRITICAL") {
+                imgEmptyAlerts?.setImageResource(R.drawable.ic_nav_alerts)
+                imgEmptyAlerts?.setColorFilter(Color.parseColor("#DC2626"))
+                textEmptyAlertsTitle?.text = "No critical alerts"
+                textEmptyAlertsSubtitle?.text = "Critical emergency alerts will appear here."
+            } else {
+                imgEmptyAlerts?.setImageResource(R.drawable.ic_nav_alerts)
+                imgEmptyAlerts?.setColorFilter(ContextCompat.getColor(this, R.color.nexora_red))
+                textEmptyAlertsTitle?.text = "You're all caught up"
+                textEmptyAlertsSubtitle?.text = "No new alerts or group messages.\nMesh and peer events will appear here."
+            }
+        } else {
+            textEmptyAlerts.visibility = View.GONE
+            alertsRecyclerView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun getOrCreateCriticalAlertManager(): CriticalAlertManager {
+        criticalAlertManager?.let { return it }
+        val repo = if (::blobRepository.isInitialized) blobRepository else BlobRepository(this)
+        val mgr = CriticalAlertManager(
+            context = this,
+            alertDao = db.alertDao(),
+            routingEngineProvider = { routingEngine },
+            userManager = if (::userManager.isInitialized) userManager else UserManager(this),
+            blobExchangeProvider = { blobExchange },
+            blobRepository = repo,
+            offlineMapManagerProvider = { offlineMapManager },
+            locationProvider = {
+                myCurrentCoordinates?.let { Pair(it.latitude, it.longitude) }
+            }
+        )
+        criticalAlertManager = mgr
+        return mgr
     }
 
     private fun loadRecentActivityFromDb() {
@@ -2603,6 +4056,9 @@ class MainActivity : AppCompatActivity() {
             }
             recentMessages.sortByDescending { it.time }
             withContext(Dispatchers.Main) {
+                if (!::recentActivityAdapter.isInitialized || !::dashEmptyRecentText.isInitialized) {
+                    return@withContext
+                }
                 recentActivityAdapter.setItems(recentMessages.take(5))
                 dashEmptyRecentText.visibility = if (recentMessages.isEmpty()) View.VISIBLE else View.GONE
             }
@@ -2619,18 +4075,47 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val peers = db.peerDao().getAllPeers()
+            peers.forEach { peer ->
+                cachedPeerAvatars[peer.name] = peer.avatarId ?: AvatarManager.DEFAULT_AVATAR_ID
+            }
+            val mappedPeers = peers.map { peer ->
+                val isDirect = (peer.isOnline && (activeEndpoints.contains(peer.endpointId) || activeEndpoints.any { ep -> pendingConnections[ep] == peer.name }))
+                val isMesh = !isDirect && (peer.isReachable && routingEngine?.isPeerReachable(peer.name) == true)
+                peer.copy(
+                    isOnline = isDirect,
+                    isReachable = isMesh
+                )
+            }
             withContext(Dispatchers.Main) {
-                peerAdapter.updateList(peers)
-                val livePeers = peers.filter {
-                    val isDirect = (it.isOnline && (activeEndpoints.contains(it.endpointId) || activeEndpoints.any { ep -> pendingConnections[ep] == it.name }))
-                    val isMesh = (it.isReachable && routingEngine?.isPeerReachable(it.name) == true)
-                    isDirect || isMesh
+                if (!::peerAdapter.isInitialized || !::connectedPeerAdapter.isInitialized || !::dashActiveCount.isInitialized) {
+                    return@withContext
                 }
+                loadConnectionsFromDb()
+                peerAdapter.updateList(mappedPeers)
+                val livePeers = mappedPeers.filter { it.isOnline || it.isReachable }
                 connectedPeerAdapter.setPeers(livePeers)
                 dashActiveCount.text = livePeers.count { it.isOnline }.toString()
-                dashKnownCount.text = peers.size.toString()
-                dashOfflineCount.text = (peers.size - livePeers.size).toString()
+                dashKnownCount.text = mappedPeers.size.toString()
+                dashOfflineCount.text = (mappedPeers.size - livePeers.size).toString()
                 dashEmptyPeersText.visibility = if (livePeers.isEmpty()) View.VISIBLE else View.GONE
+
+                val hasChats = !shouldShowEmptyChatsState(mappedPeers.size)
+                messagesEmptyStateContainer.visibility = if (hasChats) View.GONE else View.VISIBLE
+                peersRecyclerView.visibility = if (hasChats) View.VISIBLE else View.GONE
+
+                currentProfilePeerName?.let { profilePeer ->
+                    refreshPeerProfileUI(profilePeer)
+                }
+
+                if (currentChatPeerName == null) {
+                    if (livePeers.isNotEmpty()) {
+                        updateStatus("CONNECTED")
+                    } else if (isAdvertising || isDiscovering) {
+                        updateStatus("AUTO: DISCOVERING")
+                    } else {
+                        updateStatus("OFFLINE")
+                    }
+                }
             }
         }
     }
@@ -2675,27 +4160,42 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "TIMING_METRIC: [1] file selected: fileName=$fileName uri=$uri")
         lifecycleScope.launch(Dispatchers.IO) {
             val copied = FileStorageManager.copyUriToLocalStorage(this@MainActivity, uri, fileName)
-            val localPath = copied?.absolutePath ?: uri.toString()
-            val fileSize = copied?.length() ?: 0L
             val msgType = if (FileStorageManager.isImageFile(fileName)) "IMAGE" else "FILE"
+
+            // Task 9: Pre-compress images before transfer (max 1280px, JPEG-80)
+            val fileToSend: java.io.File? = if (msgType == "IMAGE" && copied != null) {
+                FileStorageManager.compressImageForTransfer(this@MainActivity, copied)
+            } else {
+                copied
+            }
+
+            val localPath = fileToSend?.absolutePath ?: uri.toString()
+            val fileSize = fileToSend?.length() ?: 0L
             val extension = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
             val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
                 ?: (if (msgType == "IMAGE") "image/jpeg" else "*/*")
 
-            val hash = if (copied != null) MeshBlobStore.computeSha256(copied) else java.util.UUID.randomUUID().toString().replace("-", "")
-            if (copied != null && hash.isNotBlank()) {
-                MeshBlobStore.saveIncoming(this@MainActivity, hash, copied)
-                blobRepository?.saveIncoming(hash, copied)
+            val hash = if (fileToSend != null) MeshBlobStore.computeSha256(fileToSend) else java.util.UUID.randomUUID().toString().replace("-", "")
+            if (fileToSend != null && hash.isNotBlank()) {
+                MeshBlobStore.saveIncoming(this@MainActivity, hash, fileToSend)
+                blobRepository?.saveIncoming(hash, fileToSend)
             }
             Log.d(TAG, "TIMING_METRIC: [2] blob prepared: hash=$hash size=$fileSize bytes took=${System.currentTimeMillis() - startTs}ms")
 
             val endpointId = resolveTargetEndpoint(peerName)
             var payloadId: Long? = null
             if (endpointId != null) {
+                endpointLastSeen[endpointId] = System.currentTimeMillis()
                 try {
-                    val pfd = contentResolver.openFileDescriptor(uri, "r")
-                    if (pfd != null) {
-                        val payload = Payload.fromFile(pfd)
+                    val payload = if (fileToSend != null && fileToSend.exists() && fileToSend.length() > 0L) {
+                        Payload.fromFile(fileToSend)
+                    } else if (copied != null && copied.exists() && copied.length() > 0L) {
+                        Payload.fromFile(copied)
+                    } else {
+                        val pfd = try { contentResolver.openFileDescriptor(uri, "r") } catch (_: Throwable) { null }
+                        if (pfd != null) Payload.fromFile(pfd) else null
+                    }
+                    if (payload != null) {
                         payloadId = payload.id
                         Nearby.getConnectionsClient(this@MainActivity).sendPayload(endpointId, payload)
                         Log.d(TAG, "ATTACHMENT_TRANSFER_STARTED: sent Nearby file payload ${payload.id} to $endpointId")
@@ -2706,7 +4206,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val localBody = "[FILE]:$fileName|$localPath|$hash|$fileSize|SUCCESS|$mimeType"
-            val wireBody = "[FILE]:$fileName||$hash|$fileSize|RECEIVING|$mimeType"
+            val wireBody = "[FILE]:$fileName||$hash|$fileSize|RECEIVING|$mimeType||${payloadId ?: ""}"
             val msgEntity = MessageEntity(
                 id = 0,
                 senderId = myNickName,
@@ -2761,6 +4261,121 @@ class MainActivity : AppCompatActivity() {
         return activeEndpoints.firstOrNull()
     }
 
+    private fun handleBlobObtained(hash: String) {
+        val normHash = hash.trim().lowercase()
+        completedBlobHashes.add(normHash)
+        pendingBlobChunks.remove(normHash)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val blobFile = blobRepository.getFile(normHash)
+            val path = blobFile?.absolutePath
+            val length = blobFile?.length() ?: 0L
+            Log.d(TAG, "ATTACHMENT_ON_OBTAINED: hash=$normHash bytes=$length")
+            Log.d(TAG, "TIMING_METRIC: [7] blob finalized: hash=$normHash bytes=$length")
+            val fileMessages = db.messageDao().getAllFileMessages()
+            val updatedMessageIds = mutableListOf<Long>()
+            for (msg in fileMessages) {
+                val fn = msg.fileName ?: "attachment"
+                if (msg.text.contains("|$normHash|") || msg.text.contains("|$normHash") || fn.contains(normHash)) {
+                    val parts = msg.text.removePrefix("[FILE]:").split("|")
+                    val mime = if (parts.size > 5) parts[5].takeIf { it.isNotBlank() } else null
+                    val key = if (parts.size > 6) parts[6].takeIf { it.isNotBlank() } else null
+
+                    val existingPath = msg.localPath
+                    val readableFile = if (!existingPath.isNullOrBlank() && File(existingPath).exists() && !existingPath.endsWith(".blob")) {
+                        File(existingPath)
+                    } else {
+                        MeshBlobStore.exportReadableFile(this@MainActivity, normHash, fn, key) ?: blobFile
+                    }
+                    val resolvedPath = readableFile?.absolutePath ?: path
+                    val resolvedLength = readableFile?.length() ?: length
+                    readableFile?.let { FileStorageManager.saveToPublicDownloads(this@MainActivity, it, fn) }
+
+                    val keySuffix = if (!key.isNullOrBlank()) "|$key" else ""
+                    val mimeSuffix = if (!mime.isNullOrBlank()) "|$mime$keySuffix" else keySuffix
+                    val newText = "[FILE]:$fn|$resolvedPath|$normHash|$resolvedLength|SUCCESS$mimeSuffix"
+                    db.messageDao().updateFileDetails(msg.id.toLong(), newText, resolvedPath ?: "", "SUCCESS", resolvedLength)
+                    updatedMessageIds.add(msg.id.toLong())
+                    Log.d(TAG, "ATTACHMENT_MESSAGE_UPDATED: id=${msg.id} hash=$normHash path=$resolvedPath")
+                }
+            }
+
+            val alerts = db.alertDao().getAllAlerts()
+            for (alert in alerts) {
+                val att = alert.attachmentPath
+                if (att != null && att.contains(normHash)) {
+                    val clean = att.removePrefix("[FILE]:")
+                    val parts = clean.split("|")
+                    val fn = parts.getOrNull(0) ?: "attachment"
+                    val key = if (parts.size > 6) parts[6].takeIf { it.isNotBlank() } else null
+                    val readableFile = MeshBlobStore.exportReadableFile(this@MainActivity, normHash, fn, key) ?: blobFile
+                    val resolvedPath = readableFile?.absolutePath ?: path
+                    val resolvedLength = readableFile?.length() ?: length
+                    val updatedAttachment = "[FILE]:$fn|$resolvedPath|$normHash|$resolvedLength|SUCCESS"
+                    db.alertDao().updateAlert(alert.copy(attachmentPath = updatedAttachment))
+                    Log.d(TAG, "ATTACHMENT_ALERT_UPDATED: alertId=${alert.alertId} hash=$normHash")
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                Log.d(TAG, "TIMING_METRIC: [8] UI becomes available: hash=$normHash")
+                for (msgId in updatedMessageIds) {
+                    val updatedMsg = db.messageDao().getMessageById(msgId)
+                    if (updatedMsg != null) {
+                        chatAdapter.updateAttachmentStatus(msgId, updatedMsg.text, updatedMsg.localPath ?: "", "SUCCESS")
+                        alertThreadAdapter.updateAttachmentStatus(msgId, updatedMsg.text, updatedMsg.localPath ?: "", "SUCCESS")
+                    }
+                }
+                if (currentChatPeerName != null) {
+                    val history = db.messageDao().getChatHistory(myNickName, currentChatPeerName!!)
+                    updateChatUI(history)
+                }
+                loadAlertsFromDb()
+                if (currentAlertThreadId != null) {
+                    val currentAlert = db.alertDao().getAlertByAlertId(currentAlertThreadId!!)
+                        ?: db.alertDao().getAlertById(currentAlertThreadId!!.toIntOrNull() ?: -1)
+                    if (currentAlert != null) {
+                        bindAlertAttachment(currentAlert)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun retryAttachmentDownload(messageId: Long, hash: String, fileName: String, senderPeer: String) {
+        val normHash = hash.trim().lowercase()
+        if (normHash.isBlank()) return
+        Log.d(TAG, "ATTACHMENT_RETRY: messageId=$messageId hash=$normHash file=$fileName peer=$senderPeer")
+        Toast.makeText(this, "Re-requesting $fileName...", Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (blobRepository.has(normHash) || MeshBlobStore.has(this@MainActivity, normHash)) {
+                handleBlobObtained(normHash)
+                return@launch
+            }
+
+            val currentMsg = db.messageDao().getMessageById(messageId)
+            val updatedText = if (currentMsg != null) {
+                currentMsg.text.replace("|FAILED", "|RECEIVING")
+            } else {
+                "[FILE]:$fileName||$normHash|0|RECEIVING"
+            }
+            db.messageDao().updateTransferStatus(messageId, "RECEIVING")
+            db.messageDao().updateFileDetails(messageId, updatedText, "", "RECEIVING", currentMsg?.fileSize ?: 0L)
+
+            withContext(Dispatchers.Main) {
+                chatAdapter.updateAttachmentStatus(messageId, updatedText, "", "RECEIVING")
+                alertThreadAdapter.updateAttachmentStatus(messageId, updatedText, "", "RECEIVING")
+                if (currentChatPeerName != null) {
+                    val history = db.messageDao().getChatHistory(myNickName, currentChatPeerName!!)
+                    updateChatUI(history)
+                }
+            }
+
+            blobExchange?.want(normHash, senderPeer.takeIf { it.isNotBlank() })
+            blobExchange?.registerCustodyHash(normHash, senderPeer.takeIf { it.isNotBlank() } ?: "")
+        }
+    }
+
     private fun openAttachment(fileName: String, pathOrUri: String) {
         if (pathOrUri.isEmpty()) {
             Toast.makeText(this, "File transfer is still in progress...", Toast.LENGTH_SHORT).show()
@@ -2787,8 +4402,24 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 if (targetFile == null || !targetFile.exists() || targetFile.length() == 0L) {
+                    // Fallback: check storage directory for any file matching fileName
+                    val storageDir = FileStorageManager.getStorageDir(this)
+                    val candidate = storageDir.listFiles()?.firstOrNull { it.name.endsWith(fileName) && it.length() > 0L }
+                    if (candidate != null) {
+                        targetFile = candidate
+                    }
+                }
+                if (targetFile == null || !targetFile.exists() || targetFile.length() == 0L) {
                     Toast.makeText(this, "Attachment is not yet available. Receiving from mesh...", Toast.LENGTH_SHORT).show()
                     return
+                }
+                // If target file is a .blob, export it with the original filename so external viewers can open it
+                if (targetFile.name.endsWith(".blob")) {
+                    val hash = targetFile.nameWithoutExtension
+                    val exported = MeshBlobStore.exportReadableFile(this, hash, fileName, null)
+                    if (exported != null && exported.exists() && exported.length() > 0L) {
+                        targetFile = exported
+                    }
                 }
                 FileStorageManager.getFileUri(this, targetFile)
             }
@@ -2816,12 +4447,26 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
-            val resolveInfoList = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            if (targetFile != null && targetFile.exists()) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    FileStorageManager.saveToPublicDownloads(this@MainActivity, targetFile, fileName)
+                }
+            }
+
+            val resolveInfoList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+            }
             for (resolveInfo in resolveInfoList) {
-                grantUriPermission(resolveInfo.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                try {
+                    grantUriPermission(resolveInfo.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (_: Throwable) {}
             }
 
             val chooser = Intent.createChooser(intent, "Open $fileName").apply {
+                clipData = ClipData.newRawUri(fileName, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -2852,10 +4497,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBackCallbackState() {
         try {
+            val isPeerProfileOpen = ::layoutPeerProfile.isInitialized && layoutPeerProfile.visibility == View.VISIBLE
+            val isConnOpen = ::layoutConnections.isInitialized && layoutConnections.visibility == View.VISIBLE
             val isAlertThreadOpen = ::layoutAlertThread.isInitialized && layoutAlertThread.visibility == View.VISIBLE
             val isChatOpen = ::layoutChat.isInitialized && layoutChat.visibility == View.VISIBLE
             val isNotDashboard = ::bottomNavigation.isInitialized && bottomNavigation.selectedItemId != R.id.nav_home
-            backPressedCallback.isEnabled = isAlertThreadOpen || isChatOpen || isNotDashboard
+            backPressedCallback.isEnabled = isPeerProfileOpen || isConnOpen || isAlertThreadOpen || isChatOpen || isNotDashboard
         } catch (e: Exception) {
             Log.e(TAG, "Error updating back callback state", e)
         }
@@ -2998,6 +4645,8 @@ class MainActivity : AppCompatActivity() {
         offlineMapManager?.onResume()
         registerP2pReceiver()
         handleChatIntent(intent)
+        loadPeersFromDb()
+        loadRecentActivityFromDb()
     }
 
     override fun onPause() {
@@ -3055,7 +4704,13 @@ class MainActivity : AppCompatActivity() {
         myCurrentCoordinates = coords
         runOnUiThread {
             dashMapCoordinatesText.text = "GPS: ${String.format(Locale.US, "%.5f, %.5f", coords.latitude, coords.longitude)}"
-            offlineMapManager?.updateMyGPSLocation(coords.latitude, coords.longitude, animateCamera = false)
+            offlineMapManager?.updateMyGPSLocation(
+                latitude = coords.latitude,
+                longitude = coords.longitude,
+                accuracy = coords.accuracy,
+                timestamp = coords.timestamp,
+                animateCamera = false
+            )
             mapStatusText.text = "📍 Offline GPS active (±${coords.accuracy.toInt()}m) • Mesh tracking ready"
         }
     }
@@ -3069,21 +4724,144 @@ class MainActivity : AppCompatActivity() {
             updateBackCallbackState()
 
             offlineMapManager?.focusOnLocation(lat, lon, includeMyPosition = true)
+            offlineMapManager?.clearRoute()
 
             val my = myCurrentCoordinates
-            if (my != null) {
+            val haversineStr = if (my != null) {
                 val distMeters = com.fury.peerconnect.logic.DistanceEngine.calculateHaversineDistance(
-                    my.latitude,
-                    my.longitude,
-                    lat,
-                    lon
+                    my.latitude, my.longitude, lat, lon
                 )
-                val distStr = com.fury.peerconnect.logic.DistanceEngine.formatDistance(distMeters)
-                mapDistanceMeasureText.text = "Distance: $distStr"
-                mapStatusText.text = "📍 Vector to '$title': $distStr straight-line"
-            } else {
-                mapDistanceMeasureText.text = ""
-                mapStatusText.text = "📍 Viewing location: $title"
+                com.fury.peerconnect.logic.DistanceEngine.formatDistance(distMeters)
+            } else null
+
+            // Show immediate approx distance while route loads
+            mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (approx.)" else ""
+            mapStatusText.text = "📍 '$title' • ${if (haversineStr != null) "Route: Loading…" else "Viewing location"}"
+
+            // Online road-following route calculation + Overpass POI — runs off main thread
+            lifecycleScope.launch(Dispatchers.IO) {
+                val myCoords = myCurrentCoordinates
+                if (myCoords != null) {
+                    val routeResult = try {
+                        mapRoutingEngine.calculateRoute(
+                            myCoords.latitude, myCoords.longitude, lat, lon
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Route calculation error: ${e.message}")
+                        null
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (routeResult != null && routeResult.points.isNotEmpty()) {
+                            offlineMapManager?.drawOsrmRoute(routeResult.points)
+                            val routeLabel = mapRoutingEngine.formatRouteSummary(routeResult)
+                            mapDistanceMeasureText.text = routeLabel
+                            mapStatusText.text = "📍 '$title' • $routeLabel"
+                        } else {
+                            // Offline fallback: no road route drawn, show approx haversine
+                            offlineMapManager?.clearRoute()
+                            mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (approx.)" else ""
+                            mapStatusText.text = "📍 '$title'${if (haversineStr != null) " • ~$haversineStr straight-line (offline)" else ""}"
+                        }
+                    }
+                }
+
+                // ─── Overpass POI (Task 7) ───────────────────────────────────────
+                val pois = try {
+                    com.fury.peerconnect.logic.OverpassPoiEngine.fetchPois(
+                        applicationContext, lat, lon
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Overpass POI error: ${e.message}")
+                    emptyList()
+                }
+
+                if (pois.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        offlineMapManager?.showPoiMarkers(pois)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setDashboardMapStyle(style: com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle) {
+        offlineMapManager?.setMapStyle(style) { success, activeStyle, message ->
+            runOnUiThread {
+                updateMapTypeSelectorUI(activeStyle)
+                if (message != null) {
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                    if (!success) {
+                        mapStatusText.text = "📍 $message"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateMapTypeSelectorUI(activeStyle: com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle) {
+        val selectedBg = R.drawable.bg_map_type_selected
+        val activeTextColor = android.graphics.Color.parseColor("#FFFFFF")
+        val inactiveTextColor = android.graphics.Color.parseColor("#94A3B8")
+
+        btnMapTypeStreet.setBackgroundResource(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET) selectedBg else 0)
+        btnMapTypeStreet.setTextColor(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET) activeTextColor else inactiveTextColor)
+
+        btnMapTypeSat.setBackgroundResource(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE) selectedBg else 0)
+        btnMapTypeSat.setTextColor(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE) activeTextColor else inactiveTextColor)
+
+        btnMapTypeHybrid.setBackgroundResource(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID) selectedBg else 0)
+        btnMapTypeHybrid.setTextColor(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID) activeTextColor else inactiveTextColor)
+    }
+
+    /**
+     * Calculates and renders a road-following route between two arbitrary coordinates (e.g. Peer A -> Peer B).
+     */
+    fun routeBetweenCoordinates(
+        fromLat: Double,
+        fromLon: Double,
+        toLat: Double,
+        toLon: Double,
+        fromTitle: String,
+        toTitle: String
+    ) {
+        runOnUiThread {
+            layoutChat.visibility = View.GONE
+            layoutAlertThread.visibility = View.GONE
+            showTab(layoutDashboard)
+            bottomNavigation.selectedItemId = R.id.nav_home
+            updateBackCallbackState()
+
+            offlineMapManager?.focusOnLocation(toLat, toLon, includeMyPosition = false)
+            offlineMapManager?.clearRoute()
+
+            val distMeters = com.fury.peerconnect.logic.DistanceEngine.calculateHaversineDistance(
+                fromLat, fromLon, toLat, toLon
+            )
+            val haversineStr = com.fury.peerconnect.logic.DistanceEngine.formatDistance(distMeters)
+            mapDistanceMeasureText.text = "~$haversineStr (approx.)"
+            mapStatusText.text = "📍 '$fromTitle' ➔ '$toTitle' • Route: Loading…"
+
+            lifecycleScope.launch(Dispatchers.IO) {
+                val routeResult = try {
+                    mapRoutingEngine.calculateRoute(fromLat, fromLon, toLat, toLon)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Route calculation error: ${e.message}")
+                    null
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (routeResult != null && routeResult.points.isNotEmpty()) {
+                        offlineMapManager?.drawOsrmRoute(routeResult.points)
+                        val routeLabel = mapRoutingEngine.formatRouteSummary(routeResult)
+                        mapDistanceMeasureText.text = routeLabel
+                        mapStatusText.text = "📍 '$fromTitle' ➔ '$toTitle' • $routeLabel"
+                    } else {
+                        offlineMapManager?.clearRoute()
+                        mapDistanceMeasureText.text = "~$haversineStr (approx.)"
+                        mapStatusText.text = "📍 '$fromTitle' ➔ '$toTitle' • ~$haversineStr straight-line (offline)"
+                    }
+                }
             }
         }
     }
@@ -3267,7 +5045,7 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
 
-            val payloadStr = "[LOC]:${coords.latitude}|${coords.longitude}|Current Location"
+            val payloadStr = "[LOC]:${coords.latitude}|${coords.longitude}|${coords.timestamp}|${coords.accuracy}|Current Location"
             sendMessage(payloadStr)
         }
     }
@@ -3318,7 +5096,8 @@ class MainActivity : AppCompatActivity() {
                     if (distMoved > 10.0 || lastSentLat == 0.0) {
                         lastSentLat = coords.latitude
                         lastSentLon = coords.longitude
-                        val payloadStr = "[LOC_LIVE]:${coords.latitude}|${coords.longitude}|Live GPS"
+                        val sessId = "sess_${myNickName.hashCode().toUInt().toString(16)}"
+                        val payloadStr = "[LOC_LIVE]:$sessId|${coords.latitude}|${coords.longitude}|${coords.timestamp}|${coords.accuracy}|ACTIVE|1800"
                         sendMessage(payloadStr)
                     }
                 }
@@ -3464,6 +5243,10 @@ class MainActivity : AppCompatActivity() {
             return (intent?.getStringExtra(EXTRA_OPEN_CHAT_PEER)
                 ?: intent?.getStringExtra("EXTRA_PEER_NAME")
                 ?: intent?.getStringExtra("peerName"))?.takeIf { it.isNotBlank() }
+        }
+
+        fun shouldShowEmptyChatsState(peerCount: Int, messageCount: Int = 0): Boolean {
+            return peerCount == 0
         }
     }
 }

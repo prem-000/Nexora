@@ -1,15 +1,16 @@
 package com.fury.peerconnect.logic
 
+import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.util.Log
+import android.view.MotionEvent
+import com.fury.peerconnect.BuildConfig
 import org.maplibre.android.MapLibre
-import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.annotations.Polyline
-import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -17,14 +18,22 @@ import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
 import java.io.File
-import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Offline Map Manager utilizing MapLibre Native.
- * Operates completely offline with zero telemetry or remote tile servers,
- * powered by locally provisioned geographic raster tiles.
+ * Offline-first Vector & Satellite Map Manager utilizing MapLibre Native SDK and an embedded NanoHTTPD tile server.
+ * Supports STREET (offline vector), SATELLITE (MapTiler high-res raster imagery), and HYBRID (satellite + vector overlays:
+ * roads, building footprints, railways, labels, POIs).
+ *
+ * Routes are drawn as real GeoJSON LineString layers rather than straight lines.
  */
 class OfflineMapManager(
     private val context: Context,
@@ -34,133 +43,120 @@ class OfflineMapManager(
     private var myMarker: Marker? = null
     private val peerMarkers = ConcurrentHashMap<String, Marker>()
     private val alertMarkers = ConcurrentHashMap<String, Marker>()
-    private var straightLinePolyline: Polyline? = null
+    private val poiMarkers = ConcurrentHashMap<String, Marker>()
 
     private var myLastLatLng: LatLng? = null
+    private var lastUserInteractionTime: Long = 0L
+    private var hasInitialZoomed: Boolean = false
+
+    // Smoothers
+    private val myCoordinateSmoother = DistanceEngine.CoordinateSmoother()
+    private val peerSmoothers = ConcurrentHashMap<String, DistanceEngine.CoordinateSmoother>()
+    private val peerLastSeenTimes = ConcurrentHashMap<String, Long>()
+
+    // Route layer IDs & current route cache for style switching persistence
+    private val ROUTE_SOURCE_ID = "nexora-route-source"
+    private val ROUTE_LAYER_ID = "nexora-route-layer"
+    private var currentRoutePoints: List<LatLng>? = null
+
+    // Embedded loopback vector tile server and prefetcher
+    val localTileServer = LocalTileServer.create(context)
+    val prefetcher = MapTilePrefetcher(context)
 
     interface OnMapReadyCallback {
         fun onMapReady()
     }
 
     init {
-        // Initialize MapLibre before using MapView
         try {
-            Log.i(TAG, "MAP_INIT: Initializing MapLibre instance")
+            Log.i(TAG, "MAP_INIT: Initializing MapLibre instance and starting local tile server")
             MapLibre.getInstance(context)
-            provisionBundledTilesIfNeeded()
+            localTileServer.start()
+            Log.i(TAG, "MAP_INIT: Local vector tile server active on port ${localTileServer.port}")
         } catch (e: Exception) {
-            Log.e(TAG, "MAP_INIT: Failed to initialize MapLibre singleton", e)
+            Log.e(TAG, "MAP_INIT: Error during initialization", e)
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     fun onCreate(savedInstanceState: Bundle?, onReady: (() -> Unit)? = null) {
         Log.i(TAG, "MAP_INIT: mapView.onCreate with savedInstanceState=${savedInstanceState != null}")
         mapView.onCreate(savedInstanceState)
+
+        // Fix gesture stealing by parent scroll containers
+        mapView.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    lastUserInteractionTime = System.currentTimeMillis()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            false
+        }
+
         mapView.getMapAsync { map ->
             mapLibreMap = map
-            configureMapLibreOffline(map, onReady)
+            map.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                    lastUserInteractionTime = System.currentTimeMillis()
+                }
+            }
+            configureMapLibre(map, onReady)
         }
     }
 
     enum class MapLayerStyle(val label: String) {
-        TACTICAL_VOYAGER("Tactical Voyager"),
-        TACTICAL_DARK("Tactical Dark"),
-        OPEN_STREET_MAP("OpenStreetMap")
+        STREET("Street"),
+        SATELLITE("Satellite"),
+        HYBRID("Hybrid")
     }
 
-    private var currentLayerStyle: MapLayerStyle = MapLayerStyle.TACTICAL_VOYAGER
+    private var currentLayerStyle: MapLayerStyle = MapLayerStyle.STREET
 
     private val peerLocationsData = ConcurrentHashMap<String, Triple<String, LatLng, Boolean>>()
     private val alertLocationsData = ConcurrentHashMap<String, Triple<String, LatLng, String?>>()
+    private val poiLocationsData = mutableListOf<OverpassPoiEngine.PoiResult>()
 
-    /**
-     * Provisions bundled offline tiles from assets to internal storage on fresh install.
-     */
-    private fun provisionBundledTilesIfNeeded() {
-        try {
-            val targetDir = File(context.filesDir, "map/tiles")
-            val markerFile = File(targetDir, ".provisioned")
-            if (markerFile.exists()) {
-                val tileCount = countTiles(targetDir)
-                Log.i(TAG, "MAP_TILE_READ: Verified $tileCount existing offline tiles in ${targetDir.absolutePath}")
-                return
-            }
-
-            Log.i(TAG, "MAP_TILE_READ: Fresh install detected, provisioning bundled tiles from assets/map/tiles...")
-            copyAssetFolder("map/tiles", targetDir)
-            markerFile.createNewFile()
-            val tileCount = countTiles(targetDir)
-            Log.i(TAG, "MAP_TILE_READ: Successfully provisioned $tileCount offline tiles to ${targetDir.absolutePath}")
-            val sample = File(targetDir, "0/0/0.png")
-            if (sample.exists()) {
-                Log.i(TAG, "MAP_TILE_READ: Verified root tile 0/0/0.png exists, size=${sample.length()} bytes")
-            }
+    fun isNetworkAvailable(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            val activeNet = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(activeNet) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         } catch (e: Exception) {
-            Log.e(TAG, "MAP_TILE_READ: Exception while provisioning bundled tiles", e)
+            false
         }
     }
 
-    private fun copyAssetFolder(srcName: String, dstDir: File) {
-        val assetManager = context.assets
-        val list = assetManager.list(srcName) ?: return
-        if (list.isEmpty()) {
-            dstDir.parentFile?.mkdirs()
-            assetManager.open(srcName).use { input ->
-                FileOutputStream(dstDir).use { output ->
-                    input.copyTo(output)
-                }
-            }
-        } else {
-            dstDir.mkdirs()
-            for (file in list) {
-                val childSrc = "$srcName/$file"
-                val childDst = File(dstDir, file)
-                copyAssetFolder(childSrc, childDst)
-            }
-        }
-    }
-
-    private fun countTiles(dir: File): Int {
-        var count = 0
-        if (!dir.exists()) return 0
-        dir.walkTopDown().forEach {
-            if (it.isFile && it.extension.equals("png", ignoreCase = true)) count++
-        }
-        return count
-    }
-
-    private fun getLocalTileUri(): String {
-        val localTile0 = File(context.filesDir, "map/tiles/0/0/0.png")
-        return if (localTile0.exists()) {
-            "file://${File(context.filesDir, "map/tiles").absolutePath}/{z}/{x}/{y}.png"
-        } else {
-            "asset://map/tiles/{z}/{x}/{y}.png"
-        }
-    }
-
-    private fun configureMapLibreOffline(map: MapLibreMap, onReady: (() -> Unit)?) {
-        Log.i(TAG, "MAP_STYLE_LOAD: Configuring MapLibre style with '${currentLayerStyle.label}'")
+    private fun configureMapLibre(map: MapLibreMap, onReady: (() -> Unit)?) {
+        Log.i(TAG, "MAP_STYLE_LOAD: Initializing MapLibre with '${currentLayerStyle.label}'")
         val styleBuilder = getStyleBuilder(currentLayerStyle)
         try {
             map.setStyle(styleBuilder) { style ->
-                Log.i(TAG, "MAP_RENDER_READY: Style loaded and base raster tiles ready for rendering")
-                map.uiSettings.isAttributionEnabled = false
+                Log.i(TAG, "MAP_RENDER_READY: Initial style loaded (${currentLayerStyle.label})")
+
+                // Enable all gestures, rotation, compass, and tilt
+                map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = false
                 map.uiSettings.isCompassEnabled = true
                 map.uiSettings.isRotateGesturesEnabled = true
-                map.uiSettings.isTiltGesturesEnabled = false
+                map.uiSettings.isTiltGesturesEnabled = true
                 map.uiSettings.isZoomGesturesEnabled = true
                 map.uiSettings.isDoubleTapGesturesEnabled = true
+                map.uiSettings.isScrollGesturesEnabled = true
 
-                // Default camera
+                // Initial camera
                 val initialTarget = myLastLatLng ?: LatLng(20.0, 0.0)
-                val initialZoom = if (myLastLatLng != null) 14.0 else 2.0
+                val initialZoom = if (myLastLatLng != null) 14.5 else 3.0
                 map.cameraPosition = CameraPosition.Builder()
                     .target(initialTarget)
                     .zoom(initialZoom)
                     .build()
-                Log.i(TAG, "MAP_CAMERA: Set initial camera target=(${initialTarget.latitude}, ${initialTarget.longitude}), zoom=$initialZoom")
 
+                addRouteLayerToStyle(style)
                 reapplyMarkers()
                 onReady?.invoke()
             }
@@ -169,76 +165,545 @@ class OfflineMapManager(
         }
     }
 
+    private fun addRouteLayerToStyle(style: Style) {
+        try {
+            if (style.getSource(ROUTE_SOURCE_ID) == null) {
+                val emptyCollection = FeatureCollection.fromFeatures(emptyList())
+                val source = GeoJsonSource(ROUTE_SOURCE_ID, emptyCollection)
+                style.addSource(source)
+            }
+            if (style.getLayer(ROUTE_LAYER_ID) == null) {
+                val layer = LineLayer(ROUTE_LAYER_ID, ROUTE_SOURCE_ID).withProperties(
+                    PropertyFactory.lineColor("#38BDF8"),  // Sky-400 — tactical cyan
+                    PropertyFactory.lineWidth(4.5f),
+                    PropertyFactory.lineCap("round"),
+                    PropertyFactory.lineJoin("round")
+                )
+                style.addLayer(layer)
+            }
+
+            // Restore active route polyline if present
+            currentRoutePoints?.let { pts ->
+                if (pts.isNotEmpty()) {
+                    val linePoints = pts.map { Point.fromLngLat(it.longitude, it.latitude) }
+                    val lineString = LineString.fromLngLats(linePoints)
+                    val feature = Feature.fromGeometry(lineString)
+                    val collection = FeatureCollection.fromFeature(feature)
+                    (style.getSource(ROUTE_SOURCE_ID) as? GeoJsonSource)?.setGeoJson(collection)
+                    Log.d(TAG, "MAP_ROUTE_LAYER: Restored ${pts.size} route points to style")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MAP_ROUTE_LAYER: Error configuring route layer", e)
+        }
+    }
+
+    /**
+     * Draws an online road-following route path on the map as a GeoJSON LineString.
+     * Replaces any previously drawn route.
+     */
+    fun drawOsrmRoute(points: List<LatLng>) {
+        currentRoutePoints = points
+        val map = mapLibreMap ?: return
+        val style = map.style ?: return
+        try {
+            val linePoints = points.map { Point.fromLngLat(it.longitude, it.latitude) }
+            val lineString = LineString.fromLngLats(linePoints)
+            val feature = Feature.fromGeometry(lineString)
+            val collection = FeatureCollection.fromFeature(feature)
+            (style.getSource(ROUTE_SOURCE_ID) as? GeoJsonSource)?.setGeoJson(collection)
+            Log.i(TAG, "MAP_ROUTE: Rendered route with ${points.size} points")
+        } catch (e: Exception) {
+            Log.w(TAG, "MAP_ROUTE: Error drawing route", e)
+        }
+    }
+
+    /**
+     * Clears the route layer.
+     */
+    fun clearRoute() {
+        currentRoutePoints = null
+        val map = mapLibreMap ?: return
+        val style = map.style ?: return
+        try {
+            val emptyCollection = FeatureCollection.fromFeatures(emptyList())
+            (style.getSource(ROUTE_SOURCE_ID) as? GeoJsonSource)?.setGeoJson(emptyCollection)
+        } catch (e: Exception) {
+            Log.w(TAG, "MAP_ROUTE: Error clearing route", e)
+        }
+    }
+
+    fun getCurrentMapStyle(): MapLayerStyle = currentLayerStyle
+
+    /**
+     * Switches the active map layer style (STREET, SATELLITE, HYBRID).
+     * If SATELLITE or HYBRID is requested without internet or without an API key,
+     * it falls back gracefully to STREET without crashing or showing a blank map.
+     */
+    fun setMapStyle(
+        requestedStyle: MapLayerStyle,
+        onResult: ((success: Boolean, activeStyle: MapLayerStyle, message: String?) -> Unit)? = null
+    ) {
+        val map = mapLibreMap ?: return
+
+        var targetStyle = requestedStyle
+        var message: String? = null
+        var isSuccess = true
+
+        if (requestedStyle == MapLayerStyle.SATELLITE || requestedStyle == MapLayerStyle.HYBRID) {
+            val apiKey = BuildConfig.MAPTILER_API_KEY.trim()
+            if (apiKey.isBlank()) {
+                Log.w(TAG, "MAP_STYLE: MapTiler API key missing, falling back to STREET style")
+                targetStyle = MapLayerStyle.STREET
+                message = "MapTiler API key not configured. Using offline street map."
+                isSuccess = false
+            } else if (!isNetworkAvailable()) {
+                Log.w(TAG, "MAP_STYLE: Internet unavailable, falling back to offline STREET style")
+                targetStyle = MapLayerStyle.STREET
+                message = "Offline mode • Satellite imagery requires internet."
+                isSuccess = false
+            }
+        }
+
+        currentLayerStyle = targetStyle
+        Log.i(TAG, "MAP_STYLE_LOAD: Applying style: ${targetStyle.label}")
+
+        val savedCamera = map.cameraPosition
+
+        try {
+            map.setStyle(getStyleBuilder(targetStyle)) { loadedStyle ->
+                Log.i(TAG, "MAP_RENDER_READY: Style ${targetStyle.label} loaded successfully")
+
+                if (savedCamera != null && savedCamera.zoom > 0) {
+                    map.cameraPosition = savedCamera
+                }
+
+                map.uiSettings.isAttributionEnabled = true
+                map.uiSettings.isLogoEnabled = false
+                map.uiSettings.isCompassEnabled = true
+                map.uiSettings.isRotateGesturesEnabled = true
+                map.uiSettings.isTiltGesturesEnabled = true
+                map.uiSettings.isZoomGesturesEnabled = true
+                map.uiSettings.isDoubleTapGesturesEnabled = true
+                map.uiSettings.isScrollGesturesEnabled = true
+
+                addRouteLayerToStyle(loadedStyle)
+                reapplyMarkers()
+                onResult?.invoke(isSuccess, targetStyle, message)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "MAP_STYLE_ERROR: Error loading style ${targetStyle.label}", e)
+            onResult?.invoke(false, targetStyle, "Failed to load map style: ${e.message}")
+        }
+    }
+
+    /**
+     * Cycles through STREET -> HYBRID -> SATELLITE -> STREET.
+     */
+    fun cycleMapStyle(onStyleChanged: ((activeStyle: MapLayerStyle, message: String?) -> Unit)? = null) {
+        val nextStyle = when (currentLayerStyle) {
+            MapLayerStyle.STREET -> MapLayerStyle.HYBRID
+            MapLayerStyle.HYBRID -> MapLayerStyle.SATELLITE
+            MapLayerStyle.SATELLITE -> MapLayerStyle.STREET
+        }
+        setMapStyle(nextStyle) { _, activeStyle, message ->
+            onStyleChanged?.invoke(activeStyle, message)
+        }
+    }
+
     private fun getStyleBuilder(layerStyle: MapLayerStyle): Style.Builder {
         val customStyle = File(context.getExternalFilesDir(null), "offline_maps/style.json")
-        if (customStyle.exists()) {
+        if (customStyle.exists() && layerStyle == MapLayerStyle.STREET) {
             Log.i(TAG, "MAP_TILE_SOURCE: Using custom external style: ${customStyle.absolutePath}")
             return Style.Builder().fromUri(customStyle.toURI().toString())
         }
 
-        val tileSourceUri = getLocalTileUri()
-        Log.i(TAG, "MAP_TILE_SOURCE: Using offline tile source: $tileSourceUri, minzoom=0, maxzoom=4, tileSize=256")
+        val tileUrl = "http://127.0.0.1:${localTileServer.port}/{z}/{x}/{y}.pbf"
+        val maptilerKey = BuildConfig.MAPTILER_API_KEY.trim()
 
-        val bgColor = when (layerStyle) {
-            MapLayerStyle.TACTICAL_VOYAGER -> "#111827"
-            MapLayerStyle.TACTICAL_DARK -> "#0B0F19"
-            MapLayerStyle.OPEN_STREET_MAP -> "#E5E7EB"
+        val json = when (layerStyle) {
+            MapLayerStyle.SATELLITE -> buildSatelliteStyleJson(maptilerKey)
+            MapLayerStyle.HYBRID -> buildHybridStyleJson(maptilerKey, tileUrl)
+            MapLayerStyle.STREET -> buildStreetStyleJson(tileUrl)
         }
 
-        val json = """
+        return Style.Builder().fromJson(json)
+    }
+
+    private fun buildSatelliteStyleJson(apiKey: String): String {
+        return """
             {
               "version": 8,
-              "name": "${layerStyle.label}",
+              "name": "Satellite",
+              "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
               "sources": {
-                "raster-tiles": {
+                "maptiler_satellite": {
                   "type": "raster",
                   "tiles": [
-                    "$tileSourceUri"
+                    "https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=$apiKey"
                   ],
-                  "tileSize": 256,
+                  "tileSize": 512,
+                  "maxzoom": 20,
+                  "attribution": "© MapTiler © OpenStreetMap contributors"
+                }
+              },
+              "layers": [
+                {
+                  "id": "maptiler_satellite_base",
+                  "type": "raster",
+                  "source": "maptiler_satellite",
                   "minzoom": 0,
-                  "maxzoom": 4,
-                  "attribution": "© OpenStreetMap contributors, © CARTO"
+                  "maxzoom": 20
+                }
+              ]
+            }
+        """.trimIndent()
+    }
+
+    private fun buildHybridStyleJson(apiKey: String, vectorTileUrl: String): String {
+        return """
+            {
+              "version": 8,
+              "name": "Hybrid",
+              "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+              "sources": {
+                "maptiler_satellite": {
+                  "type": "raster",
+                  "tiles": [
+                    "https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=$apiKey"
+                  ],
+                  "tileSize": 512,
+                  "maxzoom": 20,
+                  "attribution": "© MapTiler © OpenStreetMap contributors"
+                },
+                "openmaptiles": {
+                  "type": "vector",
+                  "tiles": [
+                    "$vectorTileUrl"
+                  ],
+                  "minzoom": 0,
+                  "maxzoom": 14,
+                  "attribution": "© OpenFreeMap © OpenStreetMap contributors"
+                }
+              },
+              "layers": [
+                {
+                  "id": "maptiler_satellite_base",
+                  "type": "raster",
+                  "source": "maptiler_satellite",
+                  "minzoom": 0,
+                  "maxzoom": 20
+                },
+                {
+                  "id": "building",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "building",
+                  "minzoom": 13,
+                  "paint": {
+                    "fill-color": "#FFFFFF",
+                    "fill-opacity": 0.22,
+                    "fill-outline-color": "#FFFFFF"
+                  }
+                },
+                {
+                  "id": "railway",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["==", "class", "rail"],
+                  "paint": {
+                    "line-color": "#E4E4E7",
+                    "line-width": 1.6,
+                    "line-dasharray": [3, 2]
+                  }
+                },
+                {
+                  "id": "transportation_minor",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["in", "class", "minor", "service", "track"],
+                  "paint": {
+                    "line-color": "#FFFFFF",
+                    "line-opacity": 0.7,
+                    "line-width": 1.5
+                  }
+                },
+                {
+                  "id": "transportation_secondary",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["in", "class", "primary", "secondary", "tertiary"],
+                  "paint": {
+                    "line-color": "#FDE047",
+                    "line-width": 2.6
+                  }
+                },
+                {
+                  "id": "transportation_motorway",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["in", "class", "motorway", "trunk"],
+                  "paint": {
+                    "line-color": "#FB923C",
+                    "line-width": 3.6
+                  }
+                },
+                {
+                  "id": "boundary",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "boundary",
+                  "paint": {
+                    "line-color": "#F1F5F9",
+                    "line-width": 1.5,
+                    "line-dasharray": [2, 2]
+                  }
+                },
+                {
+                  "id": "poi_label",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "poi",
+                  "minzoom": 14,
+                  "layout": {
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Regular"],
+                    "text-size": 10
+                  },
+                  "paint": {
+                    "text-color": "#F8FAFC",
+                    "text-halo-color": "#000000",
+                    "text-halo-width": 1.8
+                  }
+                },
+                {
+                  "id": "transportation_name",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation_name",
+                  "minzoom": 13,
+                  "layout": {
+                    "symbol-placement": "line",
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Regular"],
+                    "text-size": 11
+                  },
+                  "paint": {
+                    "text-color": "#FFFFFF",
+                    "text-halo-color": "#000000",
+                    "text-halo-width": 2.0
+                  }
+                },
+                {
+                  "id": "place_label",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "place",
+                  "minzoom": 7,
+                  "layout": {
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Bold"],
+                    "text-size": 13,
+                    "text-transform": "uppercase"
+                  },
+                  "paint": {
+                    "text-color": "#FFFFFF",
+                    "text-halo-color": "#000000",
+                    "text-halo-width": 2.5
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+    }
+
+    private fun buildStreetStyleJson(vectorTileUrl: String): String {
+        return """
+            {
+              "version": 8,
+              "name": "Street",
+              "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+              "sources": {
+                "openmaptiles": {
+                  "type": "vector",
+                  "tiles": [
+                    "$vectorTileUrl"
+                  ],
+                  "minzoom": 0,
+                  "maxzoom": 14,
+                  "attribution": "© OpenFreeMap © OpenStreetMap contributors"
                 }
               },
               "layers": [
                 {
                   "id": "background",
                   "type": "background",
-                  "paint": { "background-color": "$bgColor" }
+                  "paint": { "background-color": "#0F172A" }
                 },
                 {
-                  "id": "raster-layer",
-                  "type": "raster",
-                  "source": "raster-tiles",
-                  "minzoom": 0,
-                  "maxzoom": 22
+                  "id": "countries",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "countries",
+                  "paint": { "fill-color": "#131E35" }
+                },
+                {
+                  "id": "landcover",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "landcover",
+                  "paint": { "fill-color": "#131E35" }
+                },
+                {
+                  "id": "park",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "park",
+                  "paint": { "fill-color": "#064E3B" }
+                },
+                {
+                  "id": "water",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "water",
+                  "paint": { "fill-color": "#1E3A8A" }
+                },
+                {
+                  "id": "waterway",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "waterway",
+                  "paint": {
+                    "line-color": "#2563EB",
+                    "line-width": 1.2
+                  }
+                },
+                {
+                  "id": "building",
+                  "type": "fill",
+                  "source": "openmaptiles",
+                  "source-layer": "building",
+                  "minzoom": 13,
+                  "paint": {
+                    "fill-color": "#1E293B",
+                    "fill-outline-color": "#334155"
+                  }
+                },
+                {
+                  "id": "railway",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["==", "class", "rail"],
+                  "paint": {
+                    "line-color": "#64748B",
+                    "line-width": 1.4,
+                    "line-dasharray": [3, 2]
+                  }
+                },
+                {
+                  "id": "transportation_minor",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "paint": {
+                    "line-color": "#334155",
+                    "line-width": 1.2
+                  }
+                },
+                {
+                  "id": "transportation_secondary",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["in", "class", "primary", "secondary", "tertiary"],
+                  "paint": {
+                    "line-color": "#475569",
+                    "line-width": 2.2
+                  }
+                },
+                {
+                  "id": "transportation_motorway",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation",
+                  "filter": ["in", "class", "motorway", "trunk"],
+                  "paint": {
+                    "line-color": "#38BDF8",
+                    "line-width": 3.2
+                  }
+                },
+                {
+                  "id": "boundary",
+                  "type": "line",
+                  "source": "openmaptiles",
+                  "source-layer": "boundary",
+                  "paint": {
+                    "line-color": "#38BDF8",
+                    "line-width": 1.0,
+                    "line-dasharray": [2, 2]
+                  }
+                },
+                {
+                  "id": "poi_label",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "poi",
+                  "minzoom": 14,
+                  "layout": {
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Regular"],
+                    "text-size": 10
+                  },
+                  "paint": {
+                    "text-color": "#94A3B8",
+                    "text-halo-color": "#0F172A",
+                    "text-halo-width": 1.5
+                  }
+                },
+                {
+                  "id": "transportation_name",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "transportation_name",
+                  "minzoom": 13,
+                  "layout": {
+                    "symbol-placement": "line",
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Regular"],
+                    "text-size": 11
+                  },
+                  "paint": {
+                    "text-color": "#94A3B8",
+                    "text-halo-color": "#0F172A",
+                    "text-halo-width": 1.5
+                  }
+                },
+                {
+                  "id": "place_label",
+                  "type": "symbol",
+                  "source": "openmaptiles",
+                  "source-layer": "place",
+                  "minzoom": 8,
+                  "layout": {
+                    "text-field": "{name}",
+                    "text-font": ["Noto Sans Bold"],
+                    "text-size": 13,
+                    "text-transform": "uppercase"
+                  },
+                  "paint": {
+                    "text-color": "#94A3B8",
+                    "text-halo-color": "#0F172A",
+                    "text-halo-width": 2.0
+                  }
                 }
               ]
             }
         """.trimIndent()
-
-        return Style.Builder().fromJson(json)
-    }
-
-    fun cycleMapStyle(onStyleChanged: ((String) -> Unit)? = null) {
-        val nextStyle = when (currentLayerStyle) {
-            MapLayerStyle.TACTICAL_VOYAGER -> MapLayerStyle.TACTICAL_DARK
-            MapLayerStyle.TACTICAL_DARK -> MapLayerStyle.OPEN_STREET_MAP
-            MapLayerStyle.OPEN_STREET_MAP -> MapLayerStyle.TACTICAL_VOYAGER
-        }
-        currentLayerStyle = nextStyle
-        val map = mapLibreMap ?: return
-        Log.i(TAG, "MAP_STYLE_LOAD: Cycling to style: ${nextStyle.label}")
-        try {
-            map.setStyle(getStyleBuilder(nextStyle)) {
-                Log.i(TAG, "MAP_RENDER_READY: Style cycled to ${nextStyle.label} successfully")
-                reapplyMarkers()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "MAP_STYLE_ERROR: Error during cycleMapStyle", e)
-        }
-        onStyleChanged?.invoke(nextStyle.label)
     }
 
     private fun reapplyMarkers() {
@@ -272,13 +737,23 @@ class OfflineMapManager(
             )
             alertMarkers[alertId] = marker
         }
+        if (poiLocationsData.isNotEmpty()) {
+            showPoiMarkers(poiLocationsData)
+        }
     }
 
     /**
-     * Updates or creates the user's GPS location marker (📍 You).
+     * Updates user's GPS marker with EMA smoothing and non-disruptive camera following.
      */
-    fun updateMyGPSLocation(latitude: Double, longitude: Double, animateCamera: Boolean = false) {
-        val latLng = LatLng(latitude, longitude)
+    fun updateMyGPSLocation(
+        latitude: Double,
+        longitude: Double,
+        accuracy: Float = 0f,
+        timestamp: Long = System.currentTimeMillis(),
+        animateCamera: Boolean = false
+    ) {
+        val smoothed = myCoordinateSmoother.update(latitude, longitude, accuracy, timestamp)
+        val latLng = LatLng(smoothed.latitude, smoothed.longitude)
         myLastLatLng = latLng
 
         val map = mapLibreMap ?: return
@@ -287,15 +762,24 @@ class OfflineMapManager(
                 MarkerOptions()
                     .position(latLng)
                     .title("📍 You")
-                    .snippet("Your current GPS position")
+                    .snippet("Your current GPS position (±${accuracy.toInt()}m)")
             )
         } else {
             myMarker?.position = latLng
+            myMarker?.snippet = "Your current GPS position (±${accuracy.toInt()}m)"
         }
 
-        if (animateCamera) {
-            Log.i(TAG, "MAP_CAMERA: Animating camera to user GPS ($latitude, $longitude), zoom=15.0")
-            map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15.0), 800)
+        if (!hasInitialZoomed) {
+            hasInitialZoomed = true
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 14.5), 800)
+            prefetcher.prefetchViewport(latLng.latitude, latLng.longitude, 14.5)
+        } else if (animateCamera) {
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 14.5), 800)
+        } else {
+            val now = System.currentTimeMillis()
+            if (now - lastUserInteractionTime > 10_000L) {
+                map.easeCamera(CameraUpdateFactory.newLatLng(latLng), 400)
+            }
         }
     }
 
@@ -303,28 +787,40 @@ class OfflineMapManager(
      * Centers map on user's current GPS position.
      */
     fun recenterMyGPSLocation() {
+        lastUserInteractionTime = 0L
         myLastLatLng?.let { latLng ->
             Log.i(TAG, "MAP_CAMERA: Recentering camera to user GPS (${latLng.latitude}, ${latLng.longitude})")
-            mapLibreMap?.animateCamera(CameraUpdateFactory.newLatLng(latLng), 600)
+            mapLibreMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 14.5), 600)
         }
     }
 
     /**
-     * Updates a peer's live or static location marker.
+     * Updates a peer's location marker with EMA smoothing and staleness tracking.
      */
     fun updatePeerLocation(
         peerId: String,
         peerName: String,
         latitude: Double,
         longitude: Double,
+        accuracy: Float = 0f,
+        timestamp: Long = System.currentTimeMillis(),
         isLive: Boolean = false,
         lastUpdatedText: String = "Just now"
     ) {
-        val map = mapLibreMap ?: return
-        val latLng = LatLng(latitude, longitude)
+        val smoother = peerSmoothers.getOrPut(peerId) { DistanceEngine.CoordinateSmoother() }
+        val smoothed = smoother.update(latitude, longitude, accuracy, timestamp)
+        peerLastSeenTimes[peerId] = timestamp
 
-        val title = if (isLive) "🟢 $peerName (Live)" else "📍 $peerName"
-        val snippet = "Coords: ${String.format(java.util.Locale.US, "%.5f, %.5f", latitude, longitude)} • $lastUpdatedText"
+        val map = mapLibreMap ?: return
+        val latLng = LatLng(smoothed.latitude, smoothed.longitude)
+
+        val isStale = DistanceEngine.isFixStale(timestamp)
+        val title = when {
+            isStale -> "⚪ $peerName (Stale)"
+            isLive -> "🟢 $peerName (Live)"
+            else -> "📍 $peerName"
+        }
+        val snippet = "Coords: ${String.format(java.util.Locale.US, "%.5f, %.5f", smoothed.latitude, smoothed.longitude)} • $lastUpdatedText"
 
         peerLocationsData[peerId] = Triple(title, latLng, isLive)
         val existing = peerMarkers[peerId]
@@ -343,19 +839,15 @@ class OfflineMapManager(
         }
     }
 
-    /**
-     * Removes a peer location marker.
-     */
     fun removePeerLocation(peerId: String) {
         peerLocationsData.remove(peerId)
+        peerSmoothers.remove(peerId)
+        peerLastSeenTimes.remove(peerId)
         peerMarkers.remove(peerId)?.let {
             mapLibreMap?.removeMarker(it)
         }
     }
 
-    /**
-     * Updates or pins an emergency / missing-person alert location.
-     */
     fun updateAlertLocation(
         alertId: String,
         title: String,
@@ -388,14 +880,40 @@ class OfflineMapManager(
         }
     }
 
-    /**
-     * Focuses camera on a specific target coordinate with optional bounding box with user.
-     */
+    fun showPoiMarkers(pois: List<OverpassPoiEngine.PoiResult>) {
+        poiLocationsData.clear()
+        poiLocationsData.addAll(pois)
+        val map = mapLibreMap ?: return
+        clearPoiMarkers()
+        for (poi in pois) {
+            val icon = when (poi.type) {
+                OverpassPoiEngine.PoiType.HOSPITAL -> "🏥"
+                OverpassPoiEngine.PoiType.PHARMACY -> "💊"
+                OverpassPoiEngine.PoiType.POLICE -> "👮"
+            }
+            val marker = map.addMarker(
+                MarkerOptions()
+                    .position(LatLng(poi.lat, poi.lon))
+                    .title("$icon ${poi.name}")
+                    .snippet(poi.type.label)
+            )
+            poiMarkers[poi.id] = marker
+        }
+        Log.i(TAG, "MAP_POI: Rendered ${pois.size} POI markers")
+    }
+
+    fun clearPoiMarkers() {
+        val map = mapLibreMap ?: return
+        poiMarkers.values.forEach { map.removeMarker(it) }
+        poiMarkers.clear()
+    }
+
     fun focusOnLocation(
         targetLat: Double,
         targetLon: Double,
         includeMyPosition: Boolean = true
     ) {
+        lastUserInteractionTime = System.currentTimeMillis()
         val map = mapLibreMap ?: return
         val target = LatLng(targetLat, targetLon)
         Log.i(TAG, "MAP_CAMERA: focusOnLocation target=($targetLat, $targetLon), includeMyPosition=$includeMyPosition")
@@ -406,36 +924,40 @@ class OfflineMapManager(
                 .include(my)
                 .include(target)
                 .build()
-
-            // Draw straight-line vector between user and target
-            drawStraightLineToTarget(my, target)
-
             map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 900)
         } else {
-            map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 15.0), 800)
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.5), 800)
         }
-    }
-
-    /**
-     * Draws an offline straight-line polyline connecting the user to the target point.
-     */
-    private fun drawStraightLineToTarget(start: LatLng, end: LatLng) {
-        val map = mapLibreMap ?: return
-        straightLinePolyline?.let { map.removePolyline(it) }
-
-        straightLinePolyline = map.addPolyline(
-            PolylineOptions()
-                .add(start, end)
-                .color(Color.parseColor("#38BDF8")) // cyan tactical line
-                .width(3.5f)
-        )
     }
 
     fun clearStraightLine() {
-        straightLinePolyline?.let {
-            mapLibreMap?.removePolyline(it)
-            straightLinePolyline = null
+        clearRoute()
+    }
+
+    fun downloadAreaForOffline(onComplete: ((Int) -> Unit)? = null) {
+        val center = myLastLatLng ?: mapLibreMap?.cameraPosition?.target
+        if (center != null) {
+            prefetcher.prefetchArea(
+                latitude = center.latitude,
+                longitude = center.longitude,
+                radiusMeters = MapTilePrefetcher.DEFAULT_RADIUS_METERS,
+                onComplete = onComplete
+            )
+        } else {
+            onComplete?.invoke(0)
         }
+    }
+
+    fun getVisibleViewportBounds(): DoubleArray? {
+        val map = mapLibreMap ?: return null
+        val bounds = map.projection.visibleRegion.latLngBounds ?: return null
+        return doubleArrayOf(
+            bounds.latitudeSouth,
+            bounds.latitudeNorth,
+            bounds.longitudeWest,
+            bounds.longitudeEast,
+            map.cameraPosition.zoom
+        )
     }
 
     // Lifecycle forwarding
@@ -443,7 +965,15 @@ class OfflineMapManager(
     fun onResume() = mapView.onResume()
     fun onPause() = mapView.onPause()
     fun onStop() = mapView.onStop()
-    fun onDestroy() = mapView.onDestroy()
+    fun onDestroy() {
+        mapView.onDestroy()
+        prefetcher.cancel()
+        try {
+            localTileServer.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping local tile server", e)
+        }
+    }
     fun onLowMemory() = mapView.onLowMemory()
     fun onSaveInstanceState(outState: Bundle) = mapView.onSaveInstanceState(outState)
 

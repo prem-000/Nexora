@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+// OSRM base URL — configurable via local.properties (e.g. OSRM_BASE_URL=http://your-server:5000)
+// Leave blank to disable real routing and use approximate Haversine distance only.
+val osrmBaseUrl = localProperties.getProperty("OSRM_BASE_URL", "")
+val maptilerApiKey = localProperties.getProperty("MAPTILER_API_KEY", "")
 
 android {
     namespace = "com.fury.peerconnect"
@@ -13,9 +26,11 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 4
-        versionName = "1.3"
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "OSRM_BASE_URL", "\"$osrmBaseUrl\"")
+        buildConfigField("String", "MAPTILER_API_KEY", "\"$maptilerApiKey\"")
     }
 
     signingConfigs {
@@ -50,6 +65,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
     testOptions {
         unitTests {
@@ -79,6 +95,9 @@ dependencies {
 
     // MapLibre Native Android SDK for Offline Vector Maps
     implementation("org.maplibre.gl:android-sdk:11.5.1")
+
+    // Embedded Local HTTP Tile Server
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // Room Database
     val roomVersion = "2.6.1"

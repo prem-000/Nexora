@@ -40,8 +40,14 @@ object TacticalMapPreviewHelper {
         imageView.setImageBitmap(placeholder)
 
         // 3. Asynchronously load cached file or fetch online tile
-        val cacheFile = File(context.cacheDir, "preview_$cacheKey.png")
+        val cacheFile = File(context.cacheDir, "preview_v2_$cacheKey.png")
         scope.launch {
+            // Clean up any legacy watermarked Carto previews
+            try {
+                val oldLegacyFile = File(context.cacheDir, "preview_$cacheKey.png")
+                if (oldLegacyFile.exists()) oldLegacyFile.delete()
+            } catch (_: Exception) {}
+
             if (cacheFile.exists() && cacheFile.length() > 0) {
                 try {
                     val bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
@@ -80,8 +86,9 @@ object TacticalMapPreviewHelper {
         val y = Math.floor((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * n).toInt().coerceIn(0, n - 1)
 
         val urls = listOf(
-            "https://a.basemaps.cartocdn.com/rastertiles/voyager/$zoom/$x/$y.png",
-            "https://tile.openstreetmap.org/$zoom/$x/$y.png"
+            "https://tile.openstreetmap.org/$zoom/$x/$y.png",
+            "https://a.tile.openstreetmap.org/$zoom/$x/$y.png",
+            "https://b.tile.openstreetmap.org/$zoom/$x/$y.png"
         )
 
         for (urlStr in urls) {
@@ -90,7 +97,7 @@ object TacticalMapPreviewHelper {
                 val conn = url.openConnection() as HttpURLConnection
                 conn.connectTimeout = 3000
                 conn.readTimeout = 3000
-                conn.setRequestProperty("User-Agent", "Nexora-Tactical-Mesh/1.2")
+                conn.setRequestProperty("User-Agent", "Nexora-Tactical-Mesh/1.4 (Android; OpenStreetMap)")
                 conn.connect()
                 if (conn.responseCode == 200) {
                     val bytes = conn.inputStream.use { it.readBytes() }

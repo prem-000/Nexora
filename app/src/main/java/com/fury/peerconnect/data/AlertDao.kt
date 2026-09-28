@@ -1,4 +1,4 @@
-﻿package com.fury.peerconnect.data
+package com.fury.peerconnect.data
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -8,7 +8,7 @@ import androidx.room.Update
 
 @Dao
 interface AlertDao {
-    @Insert(onConflict = OnConflictStrategy.ABORT)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAlert(alert: AlertEntity): Long
 
     @Update

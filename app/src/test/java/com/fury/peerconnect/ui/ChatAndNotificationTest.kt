@@ -211,4 +211,22 @@ class ChatAndNotificationTest {
         // Chat closed on Messages tab -> back intercepts to return to Home
         assertTrue(isBackCallbackEnabled(isChatOpen = false, isAlertThreadOpen = false, selectedTab = MESSAGES, homeTabId = HOME))
     }
+
+    @Test
+    fun testShouldShowEmptyChatsState_EmptyPeers_ShowsEmptyState() {
+        assertTrue("When 0 peers, empty chats state must be shown",
+            MainActivity.shouldShowEmptyChatsState(peerCount = 0))
+    }
+
+    @Test
+    fun testShouldShowEmptyChatsState_WhenFirstPeerExists_HidesEmptyState() {
+        assertFalse("When at least 1 peer exists, empty chats state must be hidden",
+            MainActivity.shouldShowEmptyChatsState(peerCount = 1))
+    }
+
+    @Test
+    fun testShouldShowEmptyChatsState_MultiplePeers_HidesEmptyState() {
+        assertFalse("When multiple peers exist, empty chats state must be hidden",
+            MainActivity.shouldShowEmptyChatsState(peerCount = 3, messageCount = 12))
+    }
 }

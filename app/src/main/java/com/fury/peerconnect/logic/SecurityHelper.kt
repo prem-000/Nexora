@@ -79,4 +79,68 @@ object SecurityHelper {
     fun generateAttachmentKey(): String {
         return java.util.UUID.randomUUID().toString().replace("-", "")
     }
+
+    private const val PREFERRED_SIGN_ALGO = "Ed25519"
+    private const val FALLBACK_KEY_ALGO = "EC"
+    private const val FALLBACK_SIGN_ALGO = "SHA256withECDSA"
+
+    fun generateIdentityKeyPair(): java.security.KeyPair {
+        return try {
+            val kpg = java.security.KeyPairGenerator.getInstance(PREFERRED_SIGN_ALGO)
+            kpg.generateKeyPair()
+        } catch (_: java.security.NoSuchAlgorithmException) {
+            val kpg = java.security.KeyPairGenerator.getInstance(FALLBACK_KEY_ALGO)
+            kpg.initialize(256)
+            kpg.generateKeyPair()
+        }
+    }
+
+    fun signData(data: ByteArray, privateKey: java.security.PrivateKey): ByteArray {
+        val algo = if (privateKey.algorithm.equals("Ed25519", ignoreCase = true) || privateKey.algorithm.equals("EdDSA", ignoreCase = true)) {
+            PREFERRED_SIGN_ALGO
+        } else {
+            FALLBACK_SIGN_ALGO
+        }
+        val sig = java.security.Signature.getInstance(algo)
+        sig.initSign(privateKey)
+        sig.update(data)
+        return sig.sign()
+    }
+
+    fun verifySignature(data: ByteArray, signatureBytes: ByteArray, publicKeyBytes: ByteArray?): Boolean {
+        if (publicKeyBytes == null || publicKeyBytes.isEmpty() || signatureBytes.isEmpty()) return false
+        return try {
+            val (pubKey, algo) = decodePublicKey(publicKeyBytes) ?: return false
+            val sig = java.security.Signature.getInstance(algo)
+            sig.initVerify(pubKey)
+            sig.update(data)
+            sig.verify(signatureBytes)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun decodePublicKey(bytes: ByteArray): Pair<java.security.PublicKey, String>? {
+        val spec = java.security.spec.X509EncodedKeySpec(bytes)
+        for (algo in listOf(PREFERRED_SIGN_ALGO, "EdDSA", FALLBACK_KEY_ALGO)) {
+            try {
+                val kf = java.security.KeyFactory.getInstance(algo)
+                val pub = kf.generatePublic(spec)
+                val signAlgo = if (algo.startsWith("Ed", ignoreCase = true)) PREFERRED_SIGN_ALGO else FALLBACK_SIGN_ALGO
+                return Pair(pub, signAlgo)
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    fun decodePrivateKey(bytes: ByteArray): java.security.PrivateKey? {
+        val spec = java.security.spec.PKCS8EncodedKeySpec(bytes)
+        for (algo in listOf(PREFERRED_SIGN_ALGO, "EdDSA", FALLBACK_KEY_ALGO)) {
+            try {
+                val kf = java.security.KeyFactory.getInstance(algo)
+                return kf.generatePrivate(spec)
+            } catch (_: Exception) {}
+        }
+        return null
+    }
 }

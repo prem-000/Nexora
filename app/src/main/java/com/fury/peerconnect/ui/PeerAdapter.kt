@@ -4,14 +4,17 @@ import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.fury.peerconnect.R
 import com.fury.peerconnect.data.PeerEntity
+import com.fury.peerconnect.logic.AvatarManager
 import java.util.Locale
 
 class PeerAdapter(
-    private val onPeerClicked: (PeerEntity) -> Unit
+    private val onPeerClicked: (PeerEntity) -> Unit,
+    private val onAvatarClicked: ((PeerEntity) -> Unit)? = null
 ) : RecyclerView.Adapter<PeerAdapter.PeerViewHolder>() {
 
     private val peers = mutableListOf<PeerEntity>()
@@ -37,7 +40,7 @@ class PeerAdapter(
 
     override fun onBindViewHolder(holder: PeerViewHolder, position: Int) {
         val peer = peers[position]
-        holder.bind(peer)
+        holder.bind(peer, onAvatarClicked)
         holder.itemView.setOnClickListener {
             onPeerClicked(peer)
         }
@@ -48,12 +51,17 @@ class PeerAdapter(
     class PeerViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val nameText: TextView = itemView.findViewById(R.id.peerName)
         private val statusText: TextView = itemView.findViewById(R.id.statusText)
-        private val peerAvatar: TextView? = itemView.findViewById(R.id.peerAvatar)
+        private val peerAvatar: ImageView? = itemView.findViewById(R.id.peerAvatar)
         private val lastSeenText: TextView? = itemView.findViewById(R.id.lastSeenText)
 
-        fun bind(peer: PeerEntity) {
+        fun bind(peer: PeerEntity, onAvatarClick: ((PeerEntity) -> Unit)? = null) {
             nameText.text = peer.name
-            peerAvatar?.text = peer.name.take(1).uppercase(Locale.ROOT)
+            peerAvatar?.let {
+                AvatarManager.loadAvatar(it, peer.avatarId)
+                it.setOnClickListener {
+                    onAvatarClick?.invoke(peer)
+                }
+            }
 
             if (peer.isOnline && (!peer.isReachable || peer.hopDistance <= 1)) {
                 statusText.text = "● Direct"

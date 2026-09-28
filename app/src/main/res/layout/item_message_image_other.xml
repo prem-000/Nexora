@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:paddingLeft="12dp"
     android:paddingTop="4dp"
     android:paddingRight="12dp"
@@ -22,16 +23,69 @@
             android:padding="8dp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content">
+
+            <!-- Image preview (hidden while loading) -->
             <com.google.android.material.imageview.ShapeableImageView
                 android:id="@+id/imagePreview"
                 android:layout_width="match_parent"
                 android:layout_height="170dp"
                 android:src="@drawable/ic_image"
                 android:scaleType="centerCrop"
+                android:visibility="gone"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="parent"
                 app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Medium"/>
+
+            <!-- Shimmer / placeholder container shown while transferring -->
+            <FrameLayout
+                android:id="@+id/transferPlaceholder"
+                android:layout_width="match_parent"
+                android:layout_height="170dp"
+                android:background="#1A38BDF8"
+                android:visibility="visible"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent">
+
+                <!-- Circular progress indicator (determinate) -->
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/transferProgressIndicator"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_gravity="center"
+                    android:visibility="invisible"
+                    app:indicatorColor="#38BDF8"
+                    app:trackColor="#2038BDF8"
+                    app:trackThickness="4dp"
+                    app:indicatorSize="56dp"/>
+
+                <!-- Indeterminate spinner -->
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/transferSpinner"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:indeterminate="true"
+                    android:visibility="visible"
+                    app:indicatorColor="#5038BDF8"
+                    app:trackThickness="3dp"
+                    app:indicatorSize="48dp"/>
+
+                <!-- Percentage text label -->
+                <TextView
+                    android:id="@+id/transferProgressText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="68dp"
+                    android:text=""
+                    android:textColor="@color/nexora_text_primary"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:visibility="gone"/>
+            </FrameLayout>
+
             <TextView
                 android:textSize="13sp"
                 android:textStyle="bold"

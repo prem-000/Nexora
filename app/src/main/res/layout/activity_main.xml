@@ -46,7 +46,7 @@
                 android:paddingBottom="4dp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="● CONNECTED"
+                android:text="○ OFFLINE"
                 android:paddingHorizontal="12dp"
                 android:paddingVertical="4dp"
                 app:layout_constraintBottom_toBottomOf="@+id/appTitle"
@@ -131,7 +131,7 @@
                             android:id="@+id/dashConnStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="● CONNECTED"/>
+                            android:text="○ OFFLINE"/>
                         <TextView
                             android:textSize="13sp"
                             android:textColor="@color/nexora_text_secondary"
@@ -269,6 +269,69 @@
                             android:layout_width="match_parent"
                             android:layout_height="match_parent" />
 
+                        <!-- Top-left Map Type Switcher -->
+                        <LinearLayout
+                            android:id="@+id/mapTypeSelectorContainer"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_gravity="top|start"
+                            android:layout_margin="10dp"
+                            android:background="@drawable/bg_map_type_selector"
+                            android:padding="2dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/btnMapTypeStreet"
+                                android:layout_width="wrap_content"
+                                android:layout_height="match_parent"
+                                android:gravity="center"
+                                android:paddingHorizontal="8dp"
+                                android:text="STREET"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:textColor="#FFFFFF"
+                                android:background="@drawable/bg_map_type_selected" />
+
+                            <TextView
+                                android:id="@+id/btnMapTypeSat"
+                                android:layout_width="wrap_content"
+                                android:layout_height="match_parent"
+                                android:gravity="center"
+                                android:paddingHorizontal="8dp"
+                                android:text="SATELLITE"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:textColor="#94A3B8" />
+
+                            <TextView
+                                android:id="@+id/btnMapTypeHybrid"
+                                android:layout_width="wrap_content"
+                                android:layout_height="match_parent"
+                                android:gravity="center"
+                                android:paddingHorizontal="8dp"
+                                android:text="HYBRID"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:textColor="#94A3B8" />
+                        </LinearLayout>
+
+                        <!-- Top-left Caching Indicator -->
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/mapCachingIndicator"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top|start"
+                            android:layout_marginStart="10dp"
+                            android:layout_marginTop="44dp"
+                            android:text="Caching offline map…"
+                            android:textSize="11sp"
+                            android:textColor="#38BDF8"
+                            android:visibility="gone"
+                            app:chipBackgroundColor="#CC0F172A"
+                            app:chipStrokeColor="#38BDF8"
+                            app:chipStrokeWidth="1dp"
+                            app:chipMinHeight="28dp" />
+
                         <!-- Map Overlay Controls -->
                         <LinearLayout
                             android:layout_width="wrap_content"
@@ -299,6 +362,18 @@
                                 android:textSize="14sp"
                                 app:cornerRadius="20dp"
                                 android:contentDescription="Map Mode" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnMapDownloadArea"
+                                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:layout_marginTop="6dp"
+                                android:padding="0dp"
+                                android:text="⬇"
+                                android:textSize="14sp"
+                                app:cornerRadius="20dp"
+                                android:contentDescription="Download Area Offline" />
                         </LinearLayout>
 
                         <!-- Bottom Map Status Banner -->
@@ -418,23 +493,41 @@
                 android:layout_height="0dp"
                 android:layout_marginTop="8dp"
                 android:layout_marginBottom="12dp"
-                app:layout_constraintBottom_toTopOf="@+id/btnHost"
-                app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@+id/messagesHeaderTitle"/>
-            <TextView
-                android:textSize="14sp"
-                android:textColor="@color/nexora_text_muted"
-                android:gravity="center"
-                android:id="@+id/messagesEmptyText"
                 android:visibility="gone"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:text="No peers available.&#10;Tap Add Contact to discover and pair with nearby devices."
                 app:layout_constraintBottom_toTopOf="@+id/btnHost"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/messagesHeaderTitle"/>
+            <LinearLayout
+                android:id="@+id/messagesEmptyStateContainer"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="visible"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="12dp"
+                android:paddingHorizontal="16dp"
+                app:layout_constraintBottom_toTopOf="@+id/btnHost"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/messagesHeaderTitle">
+                <WebView
+                    android:id="@+id/messagesEmptyIllustration"
+                    android:layout_width="match_parent"
+                    android:layout_height="220dp"
+                    android:layout_marginBottom="16dp"
+                    android:overScrollMode="never"
+                    android:scrollbars="none" />
+                <TextView
+                    android:textSize="14sp"
+                    android:textColor="@color/nexora_text_muted"
+                    android:gravity="center"
+                    android:id="@+id/messagesEmptyText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="No peers available.&#10;Tap Add Contact to discover and pair with nearby devices." />
+            </LinearLayout>
             <com.google.android.material.button.MaterialButton
                 android:textSize="15sp"
                 android:textStyle="bold"
@@ -525,6 +618,18 @@
                     app:cornerRadius="18dp"
                     app:strokeColor="@color/nexora_border"
                     style="@style/Widget.Material3.Button.OutlinedButton"/>
+                <com.google.android.material.button.MaterialButton
+                    android:textSize="12sp"
+                    android:textColor="@color/nexora_text_secondary"
+                    android:id="@+id/chipAlertCritical"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="Critical"
+                    android:textAllCaps="false"
+                    android:layout_marginStart="8dp"
+                    app:cornerRadius="18dp"
+                    app:strokeColor="@color/nexora_border"
+                    style="@style/Widget.Material3.Button.OutlinedButton"/>
             </LinearLayout>
             <com.google.android.material.button.MaterialButton
                 android:textSize="14sp"
@@ -562,6 +667,7 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/btnCreateAlert">
                 <ImageView
+                    android:id="@+id/imgEmptyAlerts"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
                     android:background="@drawable/bg_avatar_circle"
@@ -570,6 +676,7 @@
                     app:tint="@color/nexora_red"
                     android:contentDescription="No alerts"/>
                 <TextView
+                    android:id="@+id/textEmptyAlertsTitle"
                     android:textSize="16sp"
                     android:textStyle="bold"
                     android:textColor="@color/nexora_text_primary"
@@ -578,6 +685,7 @@
                     android:layout_marginTop="12dp"
                     android:text="You&apos;re all caught up"/>
                 <TextView
+                    android:id="@+id/textEmptyAlertsSubtitle"
                     android:textSize="13sp"
                     android:textColor="@color/nexora_text_secondary"
                     android:gravity="center"
@@ -624,16 +732,15 @@
                         android:padding="16dp"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content">
-                        <TextView
-                            android:textSize="22sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/nexora_red"
-                            android:gravity="center"
+                        <com.google.android.material.imageview.ShapeableImageView
                             android:id="@+id/settingsAvatar"
-                            android:background="@drawable/bg_avatar_circle"
                             android:layout_width="52dp"
                             android:layout_height="52dp"
-                            android:text="N"
+                            android:background="@drawable/bg_avatar_circle"
+                            android:padding="2dp"
+                            android:scaleType="centerCrop"
+                            android:contentDescription="Settings Avatar"
+                            app:shapeAppearanceOverlay="@style/CircleImageView"
                             app:layout_constraintBottom_toBottomOf="parent"
                             app:layout_constraintStart_toStartOf="parent"
                             app:layout_constraintTop_toTopOf="parent"/>
@@ -681,6 +788,81 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="Edit →"
+                            app:layout_constraintBottom_toBottomOf="parent"
+                            app:layout_constraintEnd_toEndOf="parent"
+                            app:layout_constraintTop_toTopOf="parent"
+                            style="@style/Widget.Material3.Button.TextButton"/>
+                    </androidx.constraintlayout.widget.ConstraintLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- CONNECTIONS SECTION -->
+                <TextView
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/nexora_text_secondary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:text="CONNECTIONS"
+                    android:letterSpacing="0.08"/>
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardConnections"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    app:cardBackgroundColor="@color/nexora_surface"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="@color/nexora_border"
+                    app:strokeWidth="1dp">
+                    <androidx.constraintlayout.widget.ConstraintLayout
+                        android:padding="16dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <ImageView
+                            android:id="@+id/iconConnections"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_avatar_circle"
+                            android:padding="10dp"
+                            android:src="@drawable/ic_nav_home"
+                            app:tint="@color/nexora_red"
+                            app:layout_constraintStart_toStartOf="parent"
+                            app:layout_constraintTop_toTopOf="parent"
+                            app:layout_constraintBottom_toBottomOf="parent"
+                            android:contentDescription="Connections"/>
+                        <TextView
+                            android:id="@+id/textConnectionsTitle"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/nexora_text_primary"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:text="Connections"
+                            android:layout_marginStart="14dp"
+                            app:layout_constraintStart_toEndOf="@+id/iconConnections"
+                            app:layout_constraintEnd_toStartOf="@+id/btnViewConnections"
+                            app:layout_constraintTop_toTopOf="parent"/>
+                        <TextView
+                            android:id="@+id/textConnectionsSubtitle"
+                            android:textSize="13sp"
+                            android:textColor="@color/nexora_text_secondary"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="0 Connected · 0 Requests"
+                            android:layout_marginStart="14dp"
+                            app:layout_constraintStart_toEndOf="@+id/iconConnections"
+                            app:layout_constraintEnd_toStartOf="@+id/btnViewConnections"
+                            app:layout_constraintTop_toBottomOf="@+id/textConnectionsTitle"/>
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnViewConnections"
+                            android:textSize="14sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/nexora_red"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="View →"
                             app:layout_constraintBottom_toBottomOf="parent"
                             app:layout_constraintEnd_toEndOf="parent"
                             app:layout_constraintTop_toTopOf="parent"
@@ -924,17 +1106,16 @@
                     app:layout_constraintStart_toStartOf="parent"
                     app:layout_constraintTop_toTopOf="parent"
                     app:tint="@color/nexora_text_primary"/>
-                <TextView
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/nexora_red"
-                    android:gravity="center"
+                <com.google.android.material.imageview.ShapeableImageView
                     android:id="@+id/chatPeerAvatar"
-                    android:background="@drawable/bg_avatar_circle"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
-                    android:text="P"
+                    android:background="@drawable/bg_avatar_circle"
+                    android:padding="2dp"
+                    android:scaleType="centerCrop"
+                    android:contentDescription="Chat Peer Avatar"
                     android:layout_marginStart="8dp"
+                    app:shapeAppearanceOverlay="@style/CircleImageView"
                     app:layout_constraintBottom_toBottomOf="parent"
                     app:layout_constraintStart_toEndOf="@+id/btnExitChat"
                     app:layout_constraintTop_toTopOf="parent"/>
@@ -947,8 +1128,9 @@
                     android:layout_height="wrap_content"
                     android:text="Peer Name"
                     android:layout_marginStart="12dp"
+                    android:layout_marginEnd="8dp"
                     app:layout_constraintBottom_toTopOf="@+id/chatStatusText"
-                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintEnd_toStartOf="@+id/btnConnectChat"
                     app:layout_constraintStart_toEndOf="@+id/chatPeerAvatar"
                     app:layout_constraintTop_toTopOf="parent"
                     app:layout_constraintVertical_chainStyle="packed"/>
@@ -958,11 +1140,31 @@
                     android:id="@+id/chatStatusText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="● Connected"
+                    android:text="○ Offline"
                     android:layout_marginStart="12dp"
                     app:layout_constraintBottom_toBottomOf="parent"
                     app:layout_constraintStart_toEndOf="@+id/chatPeerAvatar"
                     app:layout_constraintTop_toBottomOf="@+id/chatHeader"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnConnectChat"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="Connect"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:visibility="gone"
+                    android:paddingHorizontal="14dp"
+                    android:paddingVertical="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:backgroundTint="@color/nexora_red"
+                    app:cornerRadius="17dp"
+                    app:elevation="0dp"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"/>
             </androidx.constraintlayout.widget.ConstraintLayout>
         </com.google.android.material.card.MaterialCardView>
         <androidx.recyclerview.widget.RecyclerView
@@ -1304,4 +1506,122 @@
             </androidx.constraintlayout.widget.ConstraintLayout>
         </com.google.android.material.card.MaterialCardView>
     </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- CONNECTIONS MANAGEMENT SCREEN -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/layoutConnections"
+        android:background="@color/nexora_bg"
+        android:visibility="gone"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:elevation="12dp">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/connAppBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="@color/nexora_surface"
+            app:cardCornerRadius="0dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/nexora_border"
+            app:strokeWidth="1dp"
+            app:layout_constraintTop_toTopOf="parent">
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="12dp"
+                android:layout_width="match_parent"
+                android:layout_height="64dp">
+                <ImageView
+                    android:id="@+id/btnExitConnections"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_arrow_back"
+                    app:tint="@color/nexora_text_primary"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    android:contentDescription="Back to Settings"/>
+                <TextView
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/nexora_text_primary"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:text="Connections"
+                    android:layout_marginStart="12dp"
+                    app:layout_constraintStart_toEndOf="@+id/btnExitConnections"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"/>
+            </androidx.constraintlayout.widget.ConstraintLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:fillViewport="true"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp"
+            app:layout_constraintTop_toBottomOf="@+id/connAppBar"
+            app:layout_constraintBottom_toBottomOf="parent">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <!-- Requests Section -->
+                <TextView
+                    android:id="@+id/textHeaderRequests"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/nexora_red"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="REQUESTS (0)"
+                    android:letterSpacing="0.08"
+                    android:visibility="gone"/>
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerConnectionRequests"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:nestedScrollingEnabled="false"
+                    android:visibility="gone"/>
+
+                <!-- Connected Section -->
+                <TextView
+                    android:id="@+id/textHeaderConnections"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/nexora_text_secondary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="CONNECTIONS"
+                    android:letterSpacing="0.08"/>
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recyclerConnectedPeers"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:nestedScrollingEnabled="false"/>
+
+                <TextView
+                    android:id="@+id/textEmptyConnections"
+                    android:textSize="14sp"
+                    android:textColor="@color/nexora_text_secondary"
+                    android:gravity="center"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="36dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="No connected peers yet.\nTap Connect on nearby or reachable peers to send a request."
+                    android:visibility="gone"/>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <include layout="@layout/layout_peer_profile" />
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,11 +1,14 @@
 package com.fury.peerconnect.ui
 
+import android.animation.ObjectAnimator
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
@@ -14,6 +17,7 @@ import com.fury.peerconnect.R
 import com.fury.peerconnect.data.ChatMessage
 import com.fury.peerconnect.data.MessageEntity
 import com.fury.peerconnect.logic.FileStorageManager
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -23,7 +27,8 @@ class ChatAdapter(
     private val myNickName: String = "",
     private val onAttachmentClick: ((String, String) -> Unit)? = null,
     private val onLocationClick: ((Double, Double, String) -> Unit)? = null,
-    private val myLocationProvider: (() -> Pair<Double, Double>?)? = null
+    private val myLocationProvider: (() -> Pair<Double, Double>?)? = null,
+    var onAttachmentRetry: ((messageId: Long, hash: String, fileName: String, senderPeer: String) -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items: ArrayList<ChatItem> = ArrayList()
@@ -203,6 +208,25 @@ class ChatAdapter(
         return false
     }
 
+    fun updateAttachmentStatus(messageId: Long, newText: String, localPath: String, status: String): Boolean {
+        val index = items.indexOfFirst { it is ChatItem.Message && it.id.toLong() == messageId }
+        if (index != -1) {
+            val current = items[index] as ChatItem.Message
+            val newProgress = if (status == "SUCCESS") 100 else current.transferProgress
+            items[index] = current.copy(
+                messageBody = newText,
+                localPath = localPath,
+                transferStatus = status,
+                transferProgress = newProgress
+            )
+            try {
+                notifyItemChanged(index)
+            } catch (_: Exception) {}
+            return true
+        }
+        return false
+    }
+
     fun hasMessage(messageId: Int): Boolean {
         return items.any { it is ChatItem.Message && it.id == messageId }
     }
@@ -251,10 +275,10 @@ class ChatAdapter(
             TYPE_DATE_SEPARATOR -> DateSeparatorViewHolder(inflater.inflate(R.layout.item_chat_date_separator, parent, false))
             TYPE_TEXT_ME -> TextViewHolder(inflater.inflate(R.layout.item_message_me, parent, false))
             TYPE_TEXT_OTHER -> TextViewHolder(inflater.inflate(R.layout.item_message_other, parent, false))
-            TYPE_FILE_ME -> FileViewHolder(inflater.inflate(R.layout.item_message_file_me, parent, false), onAttachmentClick, true)
-            TYPE_FILE_OTHER -> FileViewHolder(inflater.inflate(R.layout.item_message_file_other, parent, false), onAttachmentClick, false)
-            TYPE_IMAGE_ME -> ImageViewHolder(inflater.inflate(R.layout.item_message_image_me, parent, false), onAttachmentClick, true)
-            TYPE_IMAGE_OTHER -> ImageViewHolder(inflater.inflate(R.layout.item_message_image_other, parent, false), onAttachmentClick, false)
+            TYPE_FILE_ME -> FileViewHolder(inflater.inflate(R.layout.item_message_file_me, parent, false), onAttachmentClick, onAttachmentRetry, true)
+            TYPE_FILE_OTHER -> FileViewHolder(inflater.inflate(R.layout.item_message_file_other, parent, false), onAttachmentClick, onAttachmentRetry, false)
+            TYPE_IMAGE_ME -> ImageViewHolder(inflater.inflate(R.layout.item_message_image_me, parent, false), onAttachmentClick, onAttachmentRetry, true)
+            TYPE_IMAGE_OTHER -> ImageViewHolder(inflater.inflate(R.layout.item_message_image_other, parent, false), onAttachmentClick, onAttachmentRetry, false)
             TYPE_LOCATION_ME -> LocationViewHolder(inflater.inflate(R.layout.item_message_location_me, parent, false), onLocationClick, myLocationProvider, true)
             TYPE_LOCATION_OTHER -> LocationViewHolder(inflater.inflate(R.layout.item_message_location_other, parent, false), onLocationClick, myLocationProvider, false)
             else -> TextViewHolder(inflater.inflate(R.layout.item_message_me, parent, false))
@@ -297,6 +321,7 @@ class ChatAdapter(
     class ImageViewHolder(
         itemView: View,
         private val onAttachmentClick: ((String, String) -> Unit)?,
+        private val onAttachmentRetry: ((Long, String, String, String) -> Unit)?,
         private val isMe: Boolean
     ) : RecyclerView.ViewHolder(itemView) {
         val textFileName: TextView = itemView.findViewById(R.id.textFileName)
@@ -304,6 +329,12 @@ class ChatAdapter(
         val textTime: TextView? = itemView.findViewById(R.id.textTime)
         val imagePreview: ImageView = itemView.findViewById(R.id.imagePreview)
         val imageStatus: ImageView? = itemView.findViewById(R.id.imageStatus)
+
+        // New progress UI views (may be null on old layouts for safety)
+        val transferPlaceholder: FrameLayout? = itemView.findViewById(R.id.transferPlaceholder)
+        val transferProgressIndicator: CircularProgressIndicator? = itemView.findViewById(R.id.transferProgressIndicator)
+        val transferSpinner: CircularProgressIndicator? = itemView.findViewById(R.id.transferSpinner)
+        val transferProgressText: TextView? = itemView.findViewById(R.id.transferProgressText)
 
         fun bind(msg: ChatItem.Message) {
             val body = msg.messageBody
@@ -316,10 +347,10 @@ class ChatAdapter(
             }
             val parts = cleanBody.split("|")
             val fileName = parts.getOrNull(0) ?: "image.jpg"
-            var pathOrUri = parts.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            var pathOrUri = parts.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: msg.localPath?.takeIf { it.isNotEmpty() }
             val hash = parts.getOrNull(2)?.trim()?.lowercase() ?: ""
-            var status = parts.getOrNull(4) ?: if (pathOrUri != null) "SUCCESS" else "RECEIVING"
-            val attachmentKey = parts.getOrNull(6)?.takeIf { it.isNotBlank() }
+            var status = parts.getOrNull(4) ?: if (pathOrUri != null) "SUCCESS" else msg.transferStatus
+            val attachmentKey = parts.getOrNull(6)?.takeIf { it.isNotBlank() && it != "null" }
 
             val context = itemView.context
             if (hash.isNotBlank() && com.fury.peerconnect.logic.MeshBlobStore.has(context, hash)) {
@@ -328,6 +359,13 @@ class ChatAdapter(
                     val exported = com.fury.peerconnect.logic.MeshBlobStore.exportReadableFile(context, hash, fileName, attachmentKey)
                     pathOrUri = exported?.absolutePath ?: com.fury.peerconnect.logic.MeshBlobStore.getFile(context, hash)?.absolutePath
                 }
+            } else if (pathOrUri == null || !File(pathOrUri).exists()) {
+                val candidate = com.fury.peerconnect.logic.FileStorageManager.getStorageDir(context).listFiles()
+                    ?.firstOrNull { it.name.endsWith(fileName) && it.length() > 0L }
+                if (candidate != null && (hash.isBlank() || com.fury.peerconnect.logic.MeshBlobStore.computeSha256(candidate).equals(hash, ignoreCase = true))) {
+                    pathOrUri = candidate.absolutePath
+                    status = "SUCCESS"
+                }
             }
 
             textFileName.text = fileName
@@ -335,36 +373,102 @@ class ChatAdapter(
             textTime?.text = formatMessageTime(msg.time)
             bindStatus(imageStatus, isMe, msg.deliveryStatus, msg.alertId)
 
-            if (!pathOrUri.isNullOrEmpty()) {
-                val file = File(pathOrUri)
-                if (file.exists() && file.length() > 0L) {
-                    val bmp = loadSampledBitmap(file.absolutePath, 400, 300)
-                    if (bmp != null) {
-                        imagePreview.setImageBitmap(bmp)
-                    } else {
-                        imagePreview.setImageURI(Uri.fromFile(file))
-                    }
-                    textSender.text = "$sender • Tap to view"
-                } else if (pathOrUri.startsWith("content://")) {
-                    imagePreview.setImageURI(Uri.parse(pathOrUri))
-                    textSender.text = "$sender • Tap to view"
-                } else {
-                    imagePreview.setImageResource(R.drawable.ic_image)
-                    textSender.text = if (status == "FAILED") "$sender • Transfer failed" else "$sender • File unavailable"
+            val path = pathOrUri
+            val hasFile = !path.isNullOrEmpty() &&
+                    (path.startsWith("content://") || File(path).let { it.exists() && it.length() > 0L })
+
+            if (hasFile && path != null) {
+                // ── Image is available: reveal with crossfade ──────────────────
+                showImageWithCrossfade(path)
+                textSender.text = "$sender • Tap to view"
+                itemView.setOnClickListener {
+                    onAttachmentClick?.invoke(fileName, path)
                 }
             } else {
-                imagePreview.setImageResource(R.drawable.ic_image)
-                val statusText = when (status) {
-                    "FAILED" -> "Transfer failed"
-                    "RECEIVING" -> if (msg.transferProgress > 0) "Receiving image (${msg.transferProgress}%)..." else "Receiving image..."
-                    else -> "Pending..."
+                // ── Image is still transferring or failed ──────────────────────
+                imagePreview.visibility = View.GONE
+                transferPlaceholder?.visibility = View.VISIBLE
+
+                val progress = msg.transferProgress
+                if (status == "FAILED") {
+                    transferSpinner?.visibility = View.GONE
+                    transferProgressIndicator?.visibility = View.INVISIBLE
+                    transferProgressText?.visibility = View.GONE
+                    textSender.text = "$sender • Transfer failed • Tap to retry"
+                    itemView.setOnClickListener {
+                        if (onAttachmentRetry != null && hash.isNotBlank()) {
+                            onAttachmentRetry.invoke(msg.id.toLong(), hash, fileName, msg.senderName)
+                        } else {
+                            onAttachmentClick?.invoke(fileName, path ?: "")
+                        }
+                    }
+                } else if (progress > 0) {
+                    transferSpinner?.visibility = View.GONE
+                    transferProgressIndicator?.let { ind ->
+                        ind.visibility = View.VISIBLE
+                        ind.isIndeterminate = false
+                        val anim = ObjectAnimator.ofInt(ind, "progress", ind.progress, progress).apply {
+                            duration = 300
+                            interpolator = DecelerateInterpolator()
+                        }
+                        anim.start()
+                    }
+                    transferProgressText?.let {
+                        it.visibility = View.VISIBLE
+                        it.text = "$progress%"
+                    }
+                    val statusText = if (isMe) "$sender • Sending ($progress%)…" else "$sender • Receiving ($progress%)…"
+                    textSender.text = statusText
+                    itemView.setOnClickListener {
+                        onAttachmentClick?.invoke(fileName, path ?: "")
+                    }
+                } else {
+                    // Indeterminate
+                    transferSpinner?.visibility = View.VISIBLE
+                    transferProgressIndicator?.visibility = View.INVISIBLE
+                    transferProgressText?.visibility = View.GONE
+                    val statusText = if (isMe) "$sender • Sending…" else "$sender • Receiving…"
+                    textSender.text = statusText
+                    itemView.setOnClickListener {
+                        if (!isMe && onAttachmentRetry != null && hash.isNotBlank()) {
+                            onAttachmentRetry.invoke(msg.id.toLong(), hash, fileName, msg.senderName)
+                        } else {
+                            onAttachmentClick?.invoke(fileName, path ?: "")
+                        }
+                    }
                 }
-                textSender.text = "$sender • $statusText"
+            }
+        }
+
+        private fun showImageWithCrossfade(pathOrUri: String) {
+            val bmp: Bitmap? = if (pathOrUri.startsWith("content://")) {
+                null // URI-based — set via setImageURI below
+            } else {
+                loadSampledBitmap(pathOrUri, 400, 300)
             }
 
-            val finalPath = pathOrUri
-            itemView.setOnClickListener {
-                onAttachmentClick?.invoke(fileName, finalPath ?: "")
+            // Prepare final image (hidden at alpha=0)
+            if (bmp != null) {
+                imagePreview.setImageBitmap(bmp)
+            } else {
+                imagePreview.setImageURI(Uri.parse(pathOrUri))
+            }
+
+            // If placeholder is showing, crossfade
+            if (transferPlaceholder?.visibility == View.VISIBLE) {
+                imagePreview.alpha = 0f
+                imagePreview.visibility = View.VISIBLE
+                imagePreview.animate()
+                    .alpha(1f)
+                    .setDuration(280)
+                    .withEndAction {
+                        transferPlaceholder.visibility = View.GONE
+                    }
+                    .start()
+            } else {
+                imagePreview.visibility = View.VISIBLE
+                imagePreview.alpha = 1f
+                transferPlaceholder?.visibility = View.GONE
             }
         }
     }
@@ -372,6 +476,7 @@ class ChatAdapter(
     class FileViewHolder(
         itemView: View,
         private val onAttachmentClick: ((String, String) -> Unit)?,
+        private val onAttachmentRetry: ((Long, String, String, String) -> Unit)?,
         private val isMe: Boolean
     ) : RecyclerView.ViewHolder(itemView) {
         val textFileName: TextView = itemView.findViewById(R.id.textFileName)
@@ -391,12 +496,12 @@ class ChatAdapter(
             }
             val parts = cleanBody.split("|")
             val fileName = parts.getOrNull(0) ?: "attachment"
-            var pathOrUri = parts.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            var pathOrUri = parts.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: msg.localPath?.takeIf { it.isNotEmpty() }
             val hash = parts.getOrNull(2)?.trim()?.lowercase() ?: ""
             val sizeStr = parts.getOrNull(3)
             val fileSize = sizeStr?.toLongOrNull() ?: 0L
-            var status = parts.getOrNull(4) ?: if (pathOrUri != null) "SUCCESS" else "RECEIVING"
-            val attachmentKey = parts.getOrNull(6)?.takeIf { it.isNotBlank() }
+            var status = parts.getOrNull(4) ?: if (pathOrUri != null) "SUCCESS" else msg.transferStatus
+            val attachmentKey = parts.getOrNull(6)?.takeIf { it.isNotBlank() && it != "null" }
 
             val context = itemView.context
             if (hash.isNotBlank() && com.fury.peerconnect.logic.MeshBlobStore.has(context, hash)) {
@@ -404,6 +509,13 @@ class ChatAdapter(
                 if (pathOrUri == null || !File(pathOrUri).exists()) {
                     val exported = com.fury.peerconnect.logic.MeshBlobStore.exportReadableFile(context, hash, fileName, attachmentKey)
                     pathOrUri = exported?.absolutePath ?: com.fury.peerconnect.logic.MeshBlobStore.getFile(context, hash)?.absolutePath
+                }
+            } else if (pathOrUri == null || !File(pathOrUri).exists()) {
+                val candidate = com.fury.peerconnect.logic.FileStorageManager.getStorageDir(context).listFiles()
+                    ?.firstOrNull { it.name.endsWith(fileName) && it.length() > 0L }
+                if (candidate != null && (hash.isBlank() || com.fury.peerconnect.logic.MeshBlobStore.computeSha256(candidate).equals(hash, ignoreCase = true))) {
+                    pathOrUri = candidate.absolutePath
+                    status = "SUCCESS"
                 }
             }
 
@@ -413,10 +525,11 @@ class ChatAdapter(
             bindStatus(imageStatus, isMe, msg.deliveryStatus, msg.alertId)
 
             val sizePrefix = if (fileSize > 0L) "${FileStorageManager.formatFileSize(fileSize)} • " else ""
-            val metaStatus = if (pathOrUri != null && (File(pathOrUri).exists() || pathOrUri.startsWith("content://"))) {
+            val hasFile = pathOrUri != null && (File(pathOrUri).exists() || pathOrUri.startsWith("content://"))
+            val metaStatus = if (hasFile) {
                 "Tap to open"
             } else if (status == "FAILED") {
-                "Transfer failed"
+                "Transfer failed • Tap to retry"
             } else if (status == "RECEIVING") {
                 if (msg.transferProgress > 0) "Receiving (${msg.transferProgress}%)..." else "Receiving..."
             } else {
@@ -424,9 +537,18 @@ class ChatAdapter(
             }
             textFileMeta.text = "$sizePrefix$metaStatus"
 
-            val finalPath = pathOrUri
             itemView.setOnClickListener {
-                onAttachmentClick?.invoke(fileName, finalPath ?: "")
+                if (hasFile && pathOrUri != null) {
+                    onAttachmentClick?.invoke(fileName, pathOrUri)
+                } else if (status == "FAILED" || (!isMe && !hasFile)) {
+                    if (onAttachmentRetry != null && hash.isNotBlank()) {
+                        onAttachmentRetry.invoke(msg.id.toLong(), hash, fileName, msg.senderName)
+                    } else {
+                        onAttachmentClick?.invoke(fileName, pathOrUri ?: "")
+                    }
+                } else {
+                    onAttachmentClick?.invoke(fileName, pathOrUri ?: "")
+                }
             }
         }
     }
@@ -452,9 +574,22 @@ class ChatAdapter(
             val clean = if (isLive) body.removePrefix("[LOC_LIVE]:") else body.removePrefix("[LOC]:")
             val parts = clean.split("|")
 
-            val lat = parts.getOrNull(0)?.toDoubleOrNull() ?: 0.0
-            val lon = parts.getOrNull(1)?.toDoubleOrNull() ?: 0.0
-            val label = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: (if (isLive) "Live GPS" else "GPS Location")
+            val lat: Double
+            val lon: Double
+            val label: String
+            if (isLive) {
+                lat = parts.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+                lon = parts.getOrNull(2)?.toDoubleOrNull() ?: 0.0
+                label = "Live GPS"
+            } else {
+                lat = parts.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+                lon = parts.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+                label = if (parts.size >= 4 && parts[3].toFloatOrNull() != null) {
+                    parts.getOrNull(4)?.takeIf { it.isNotBlank() } ?: "Current Location"
+                } else {
+                    parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: "GPS Location"
+                }
+            }
 
             badgeLocationHeader.text = if (isLive) "🟢 LIVE LOCATION" else "📍 SHARED LOCATION"
             textCoordinates.text = String.format(Locale.US, "%.5f, %.5f", lat, lon)
