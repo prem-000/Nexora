@@ -81,7 +81,7 @@
         android:id="@+id/contentFrame"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:layout_constraintBottom_toTopOf="@+id/bottomNavigation"
+        app:layout_constraintBottom_toTopOf="@+id/bottomNavigationCompose"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/mainHeaderCard">
@@ -224,192 +224,6 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- OFFLINE MAP CARD (Phase 1-2: Inside Dashboard) -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-                    <TextView
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/nexora_text_secondary"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="OFFLINE TACTICAL MAP"
-                        android:letterSpacing="0.08"/>
-                    <TextView
-                        android:id="@+id/dashMapCoordinatesText"
-                        android:textSize="11sp"
-                        android:textColor="@color/nexora_text_secondary"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="GPS Acquiring..."/>
-                </LinearLayout>
-
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/dashMapCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="260dp"
-                    android:layout_marginTop="8dp"
-                    android:layout_marginBottom="20dp"
-                    app:cardBackgroundColor="@color/nexora_surface"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="0dp"
-                    app:strokeColor="@color/nexora_border"
-                    app:strokeWidth="1dp">
-
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent">
-
-                        <org.maplibre.android.maps.MapView
-                            android:id="@+id/dashMapView"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent" />
-
-                        <!-- Top-left Map Type Switcher -->
-                        <LinearLayout
-                            android:id="@+id/mapTypeSelectorContainer"
-                            android:layout_width="wrap_content"
-                            android:layout_height="28dp"
-                            android:layout_gravity="top|start"
-                            android:layout_margin="10dp"
-                            android:background="@drawable/bg_map_type_selector"
-                            android:padding="2dp"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:id="@+id/btnMapTypeStreet"
-                                android:layout_width="wrap_content"
-                                android:layout_height="match_parent"
-                                android:gravity="center"
-                                android:paddingHorizontal="8dp"
-                                android:text="STREET"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#FFFFFF"
-                                android:background="@drawable/bg_map_type_selected" />
-
-                            <TextView
-                                android:id="@+id/btnMapTypeSat"
-                                android:layout_width="wrap_content"
-                                android:layout_height="match_parent"
-                                android:gravity="center"
-                                android:paddingHorizontal="8dp"
-                                android:text="SATELLITE"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#94A3B8" />
-
-                            <TextView
-                                android:id="@+id/btnMapTypeHybrid"
-                                android:layout_width="wrap_content"
-                                android:layout_height="match_parent"
-                                android:gravity="center"
-                                android:paddingHorizontal="8dp"
-                                android:text="HYBRID"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#94A3B8" />
-                        </LinearLayout>
-
-                        <!-- Top-left Caching Indicator -->
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/mapCachingIndicator"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top|start"
-                            android:layout_marginStart="10dp"
-                            android:layout_marginTop="44dp"
-                            android:text="Caching offline map…"
-                            android:textSize="11sp"
-                            android:textColor="#38BDF8"
-                            android:visibility="gone"
-                            app:chipBackgroundColor="#CC0F172A"
-                            app:chipStrokeColor="#38BDF8"
-                            app:chipStrokeWidth="1dp"
-                            app:chipMinHeight="28dp" />
-
-                        <!-- Map Overlay Controls -->
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top|end"
-                            android:layout_margin="10dp"
-                            android:orientation="vertical">
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnMapRecenter"
-                                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                                android:layout_width="40dp"
-                                android:layout_height="40dp"
-                                android:padding="0dp"
-                                android:text="🎯"
-                                android:textSize="14sp"
-                                app:cornerRadius="20dp"
-                                android:contentDescription="Recenter GPS Location" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnMapLayers"
-                                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                                android:layout_width="40dp"
-                                android:layout_height="40dp"
-                                android:layout_marginTop="6dp"
-                                android:padding="0dp"
-                                android:text="🗺"
-                                android:textSize="14sp"
-                                app:cornerRadius="20dp"
-                                android:contentDescription="Map Mode" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnMapDownloadArea"
-                                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                                android:layout_width="40dp"
-                                android:layout_height="40dp"
-                                android:layout_marginTop="6dp"
-                                android:padding="0dp"
-                                android:text="⬇"
-                                android:textSize="14sp"
-                                app:cornerRadius="20dp"
-                                android:contentDescription="Download Area Offline" />
-                        </LinearLayout>
-
-                        <!-- Bottom Map Status Banner -->
-                        <LinearLayout
-                            android:id="@+id/mapStatusBanner"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="bottom"
-                            android:background="#D9000000"
-                            android:orientation="horizontal"
-                            android:paddingHorizontal="12dp"
-                            android:paddingVertical="6dp"
-                            android:gravity="center_vertical">
-
-                            <TextView
-                                android:id="@+id/mapStatusText"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:textSize="11sp"
-                                android:textColor="#FFFFFF"
-                                android:text="📍 Offline GPS active • Mesh tracking ready" />
-
-                            <TextView
-                                android:id="@+id/mapDistanceMeasureText"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:textSize="11sp"
-                                android:textStyle="bold"
-                                android:textColor="#4ADE80"
-                                android:text="" />
-                        </LinearLayout>
-
-                    </FrameLayout>
-                </com.google.android.material.card.MaterialCardView>
-
                 <TextView
                     android:textSize="12sp"
                     android:textStyle="bold"
@@ -541,6 +355,795 @@
                 app:cornerRadius="12dp"
                 app:elevation="0dp"
                 app:layout_constraintBottom_toBottomOf="parent"/>
+        </androidx.constraintlayout.widget.ConstraintLayout>
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/layoutMap"
+            android:visibility="gone"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!-- Full-Screen Edge-to-Edge Map Canvas -->
+            <org.maplibre.android.maps.MapView
+                android:id="@+id/dashMapView"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent" />
+
+            <!-- Retained dashMapCard (0dp / transparent) for backward-compatible references if any -->
+            <View
+                android:id="@+id/dashMapCard"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent" />
+
+            <!-- Floating Top Search Bar (Google Maps Style) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/mapSearchCard"
+                android:layout_width="0dp"
+                android:layout_height="54dp"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="12dp"
+                app:cardBackgroundColor="@color/nexora_surface"
+                app:cardCornerRadius="22dp"
+                app:cardElevation="6dp"
+                app:strokeColor="@color/nexora_border"
+                app:strokeWidth="1dp"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="16dp">
+
+                    <ImageView
+                        android:id="@+id/iconMapSearch"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:src="@drawable/ic_search"
+                        app:tint="@color/nexora_text_secondary"
+                        android:contentDescription="Search" />
+
+                    <EditText
+                        android:id="@+id/editMapSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginStart="12dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@null"
+                        android:hint="Search peers, alerts, emergency facilities…"
+                        android:textColor="@color/nexora_text_primary"
+                        android:textColorHint="@color/nexora_text_muted"
+                        android:textSize="14sp"
+                        android:imeOptions="actionSearch"
+                        android:singleLine="true" />
+
+                    <ImageView
+                        android:id="@+id/btnMapSearchClear"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:padding="6dp"
+                        android:src="@drawable/ic_close"
+                        android:visibility="gone"
+                        app:tint="@color/nexora_text_secondary"
+                        android:contentDescription="Clear Search" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Floating Search Results Card (Dropdown) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/mapSearchResultsCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="4dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/nexora_surface"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="10dp"
+                app:strokeColor="@color/nexora_border"
+                app:strokeWidth="1dp"
+                app:layout_constraintTop_toBottomOf="@+id/mapSearchCard"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingVertical="4dp">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recyclerMapSearchResults"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxHeight="240dp"
+                        android:overScrollMode="never" />
+
+                    <TextView
+                        android:id="@+id/textMapSearchNotice"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:padding="12dp"
+                        android:textSize="12sp"
+                        android:textColor="@color/nexora_text_muted"
+                        android:visibility="gone"
+                        android:text="No local mesh peers, alerts or emergency facilities found.\nOffline location search is restricted to active peers, alerts and locally provisioned POIs." />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Emergency POI Category Filter Chips (Horizontal Scroll) -->
+            <HorizontalScrollView
+                android:id="@+id/mapCategoryFilterScroll"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:scrollbars="none"
+                android:overScrollMode="never"
+                app:layout_constraintTop_toBottomOf="@+id/mapSearchCard"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp">
+
+                    <TextView
+                        android:id="@+id/chipCategoryAll"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="All"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
+                        android:background="@drawable/bg_category_chip_active" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryHospital"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="🏥 Hospitals &amp; ED"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryPolice"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="👮 Police"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryFire"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="🚒 Fire &amp; Rescue"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryAmbulance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="🚑 Ambulance"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryPharmacy"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="💊 Pharmacies"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryRailwayPolice"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="🛡️ RPF &amp; GRP"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryRailwayHelp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="🚉 Railway Help"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+
+                    <TextView
+                        android:id="@+id/chipCategoryShelter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="⛺ Shelters"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="#F5F7FA"
+                        android:background="@drawable/bg_category_chip_inactive" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <!-- Status Row (GPS + Offline Status) & Map Style Segmented Control Container -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/mapStatusRowContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="16dp"
+                app:layout_constraintTop_toBottomOf="@+id/mapCategoryFilterScroll"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <!-- Left-side Status Chips -->
+                <LinearLayout
+                    android:id="@+id/mapStatusChipsRow"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toStartOf="@+id/mapTypeSelectorContainer">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <!-- Compact Status: Offline Map Available -->
+                        <TextView
+                            android:id="@+id/textOfflineMapStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:gravity="center"
+                            android:background="@drawable/bg_map_status_pill"
+                            android:paddingHorizontal="10dp"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="#10B981"
+                            android:text="● Offline map available" />
+
+                        <!-- Compact Status: Real GPS Accuracy -->
+                        <TextView
+                            android:id="@+id/dashMapCoordinatesText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="28dp"
+                            android:layout_marginStart="6dp"
+                            android:gravity="center"
+                            android:background="@drawable/bg_map_status_pill"
+                            android:paddingHorizontal="10dp"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="#38BDF8"
+                            android:text="GPS acquiring…" />
+                    </LinearLayout>
+
+                    <!-- Caching Indicator Chip -->
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/mapCachingIndicator"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Caching offline map…"
+                        android:textSize="10sp"
+                        android:textColor="#38BDF8"
+                        android:visibility="gone"
+                        app:chipBackgroundColor="#CC17212B"
+                        app:chipStrokeColor="#38BDF8"
+                        app:chipStrokeWidth="1dp"
+                        app:chipMinHeight="24dp" />
+                </LinearLayout>
+
+                <!-- Floating Modern Segmented Map Style Switcher (Street / Satellite / Hybrid) -->
+                <LinearLayout
+                    android:id="@+id/mapTypeSelectorContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:background="@drawable/bg_map_type_selector"
+                    android:padding="2dp"
+                    android:elevation="4dp"
+                    android:orientation="horizontal"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent">
+
+                    <TextView
+                        android:id="@+id/btnMapTypeStreet"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:text="STREET"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
+                        android:background="@drawable/bg_map_type_selected" />
+
+                    <TextView
+                        android:id="@+id/btnMapTypeSat"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:text="SATELLITE"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="#94A3B8" />
+
+                    <TextView
+                        android:id="@+id/btnMapTypeHybrid"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:text="HYBRID"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="#94A3B8" />
+                </LinearLayout>
+            </androidx.constraintlayout.widget.ConstraintLayout>
+
+            <!-- Right-Side Floating Map Controls (Unified Floating Control Group) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/mapFloatingControlsCard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="#E617212B"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="6dp"
+                app:strokeColor="#334155"
+                app:strokeWidth="1dp"
+                app:layout_constraintBottom_toTopOf="@+id/mapDetailsCard"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <LinearLayout
+                    android:id="@+id/mapFloatingControls"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal">
+
+                    <!-- Compass Reset Bearing -->
+                    <ImageView
+                        android:id="@+id/btnMapCompass"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="12dp"
+                        android:src="@drawable/ic_compass"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Reset Compass Orientation" />
+
+                    <View
+                        android:layout_width="32dp"
+                        android:layout_height="1dp"
+                        android:background="#26334155" />
+
+                    <!-- Recenter Current GPS Location -->
+                    <ImageView
+                        android:id="@+id/btnMapRecenter"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="12dp"
+                        android:src="@drawable/ic_my_location"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Recenter Current Location" />
+
+                    <View
+                        android:layout_width="32dp"
+                        android:layout_height="1dp"
+                        android:background="#26334155" />
+
+                    <!-- Zoom In -->
+                    <ImageView
+                        android:id="@+id/btnMapZoomIn"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="13dp"
+                        android:src="@drawable/ic_zoom_in"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Zoom In" />
+
+                    <View
+                        android:layout_width="32dp"
+                        android:layout_height="1dp"
+                        android:background="#26334155" />
+
+                    <!-- Zoom Out -->
+                    <ImageView
+                        android:id="@+id/btnMapZoomOut"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="13dp"
+                        android:src="@drawable/ic_zoom_out"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Zoom Out" />
+
+                    <View
+                        android:layout_width="32dp"
+                        android:layout_height="1dp"
+                        android:background="#26334155" />
+
+                    <!-- Map Layers Toggle -->
+                    <ImageView
+                        android:id="@+id/btnMapLayers"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="12dp"
+                        android:src="@drawable/ic_layers"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Map Details &amp; Layers" />
+
+                    <View
+                        android:layout_width="32dp"
+                        android:layout_height="1dp"
+                        android:background="#26334155" />
+
+                    <!-- Download Area for Offline -->
+                    <ImageView
+                        android:id="@+id/btnMapDownloadArea"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:padding="13dp"
+                        android:src="@drawable/ic_download"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Download Area Offline" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Bottom Floating Details Card (Google Maps Style Bottom Sheet) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/mapDetailsCard"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginBottom="12dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/nexora_surface"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="12dp"
+                app:strokeColor="@color/nexora_border"
+                app:strokeWidth="1dp"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintEnd_toEndOf="parent">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <View
+                        android:layout_width="36dp"
+                        android:layout_height="4dp"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginBottom="10dp"
+                        android:background="@drawable/bg_badge_pill"
+                        android:alpha="0.6" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <com.google.android.material.imageview.ShapeableImageView
+                            android:id="@+id/mapDetailAvatar"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_avatar_circle"
+                            android:padding="2dp"
+                            android:scaleType="centerCrop"
+                            app:shapeAppearanceOverlay="@style/CircleImageView" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:orientation="vertical">
+
+                            <!-- Category Badge -->
+                            <TextView
+                                android:id="@+id/mapDetailCategoryBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/bg_badge_pill"
+                                android:paddingHorizontal="8dp"
+                                android:paddingVertical="2dp"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:textColor="#0284C7"
+                                android:visibility="gone"
+                                android:text="HOSPITAL" />
+
+                            <TextView
+                                android:id="@+id/mapDetailTitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/nexora_text_primary"
+                                android:text="Facility Name" />
+
+                            <TextView
+                                android:id="@+id/mapDetailSubtitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:textSize="12sp"
+                                android:textColor="@color/nexora_live"
+                                android:text="Live Location" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:id="@+id/btnMapDetailClose"
+                            android:layout_width="32dp"
+                            android:layout_height="32dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:padding="6dp"
+                            android:src="@drawable/ic_close"
+                            app:tint="@color/nexora_text_secondary"
+                            android:contentDescription="Close details" />
+                    </LinearLayout>
+
+                    <!-- Coordinates and Distance Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/mapDetailCoordinates"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="12sp"
+                            android:textColor="@color/nexora_text_secondary"
+                            android:text="Coords: 0.0000, 0.0000" />
+
+                        <TextView
+                            android:id="@+id/mapDetailDistance"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/nexora_live"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <!-- Verified POI Information Section -->
+                    <LinearLayout
+                        android:id="@+id/mapDetailVerifiedSection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginTop="6dp"
+                        android:visibility="gone">
+
+                        <!-- Address -->
+                        <TextView
+                            android:id="@+id/mapDetailAddressText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textSize="11sp"
+                            android:textColor="@color/nexora_text_secondary"
+                            android:visibility="gone"
+                            android:text="" />
+
+                        <!-- Operator / Authority -->
+                        <TextView
+                            android:id="@+id/mapDetailOperatorText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textSize="11sp"
+                            android:textColor="@color/nexora_text_muted"
+                            android:visibility="gone"
+                            android:text="" />
+
+                        <!-- Emergency Capabilities -->
+                        <TextView
+                            android:id="@+id/mapDetailCapabilitiesText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textSize="11sp"
+                            android:textColor="@color/nexora_text_secondary"
+                            android:visibility="gone"
+                            android:text="" />
+
+                        <!-- Verified Contact Phone Row -->
+                        <LinearLayout
+                            android:id="@+id/mapDetailContactRow"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:visibility="gone">
+
+                            <TextView
+                                android:id="@+id/mapDetailPhoneText"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                android:textColor="#0284C7"
+                                android:text="Emergency: 112" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnMapCall"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:text="Call"
+                                android:textSize="12sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/white"
+                                android:textAllCaps="false"
+                                app:icon="@drawable/ic_phone"
+                                app:iconTint="@color/white"
+                                app:iconSize="14dp"
+                                app:backgroundTint="#16A34A"
+                                app:cornerRadius="8dp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Route Summary Card -->
+                    <LinearLayout
+                        android:id="@+id/layoutMapRouteSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_map_type_selector"
+                        android:padding="10dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/mapStatusText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textSize="12sp"
+                            android:textColor="#FFFFFF"
+                            android:text="📍 Offline GPS active • Mesh tracking ready" />
+
+                        <TextView
+                            android:id="@+id/mapDistanceMeasureText"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="#38BDF8"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/textMapOfflineNotice"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:textSize="11sp"
+                            android:textColor="@color/nexora_text_muted"
+                            android:visibility="gone"
+                            android:text="Offline: Road-route data requires local graph. Outside provisioned sector." />
+                    </LinearLayout>
+
+                    <!-- Contextual Actions -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnMapDirections"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:text="Navigate"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/white"
+                            android:textAllCaps="false"
+                            app:icon="@drawable/ic_directions"
+                            app:iconTint="@color/white"
+                            app:backgroundTint="#0284C7"
+                            app:cornerRadius="12dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnMapMessage"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="Message"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/nexora_text_primary"
+                            android:textAllCaps="false"
+                            app:icon="@drawable/ic_nav_messages"
+                            app:iconTint="@color/nexora_text_primary"
+                            app:backgroundTint="@color/nexora_bg"
+                            app:strokeColor="@color/nexora_border"
+                            app:strokeWidth="1dp"
+                            app:cornerRadius="12dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnMapClearRoute"
+                            android:layout_width="wrap_content"
+                            android:layout_height="46dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Clear"
+                            android:textSize="13sp"
+                            android:textColor="@color/nexora_text_secondary"
+                            android:textAllCaps="false"
+                            android:visibility="gone"
+                            style="@style/Widget.Material3.Button.TextButton" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
         </androidx.constraintlayout.widget.ConstraintLayout>
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/layoutAlerts"
@@ -1061,12 +1664,21 @@
             </LinearLayout>
         </ScrollView>
     </FrameLayout>
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/bottomNavigationCompose"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/nexora_surface"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNavigation"
-        android:background="@color/nexora_surface"
+        style="@style/Widget.Nexora.BottomNavigation"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        app:elevation="4dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:elevation="0dp"
+        app:itemActiveIndicatorStyle="@style/Widget.Nexora.BottomNavigation.ActiveIndicator"
         app:itemIconTint="@color/nav_item_color"
         app:itemTextColor="@color/nav_item_color"
         app:labelVisibilityMode="unlabeled"

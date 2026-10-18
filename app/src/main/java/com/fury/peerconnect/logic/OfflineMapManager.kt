@@ -44,6 +44,56 @@ class OfflineMapManager(
     private val peerMarkers = ConcurrentHashMap<String, Marker>()
     private val alertMarkers = ConcurrentHashMap<String, Marker>()
     private val poiMarkers = ConcurrentHashMap<String, Marker>()
+    private val emergencyPoiMarkers = ConcurrentHashMap<String, Marker>()
+    private val emergencyPoiRecords = ConcurrentHashMap<String, com.fury.peerconnect.data.EmergencyPoiEntity>()
+    private val peerRecords = ConcurrentHashMap<String, PeerMarkerRecord>()
+
+    var isPeersLayerVisible: Boolean = true
+        private set
+    var isAlertsLayerVisible: Boolean = true
+        private set
+    var isFacilitiesLayerVisible: Boolean = true
+        private set
+
+    var onMarkerSelected: ((MapSelection) -> Unit)? = null
+    var onMapCanvasClicked: (() -> Unit)? = null
+
+    data class MapSelection(
+        val id: String,
+        val type: SelectionType,
+        val title: String,
+        val subtitle: String,
+        val latitude: Double,
+        val longitude: Double,
+        val isLive: Boolean = false,
+        val isStale: Boolean = false,
+        val distanceText: String? = null,
+        val avatarId: String? = null,
+        val emergencyCategory: com.fury.peerconnect.data.EmergencyCategory? = null,
+        val contactPhone: String? = null,
+        val emergencyPhone: String? = null,
+        val address: String? = null,
+        val operator: String? = null,
+        val capabilities: String? = null
+    )
+
+    enum class SelectionType {
+        PEER, ALERT, POI, SELF
+    }
+
+    data class PeerMarkerRecord(
+        val peerId: String,
+        val peerName: String,
+        val latLng: LatLng,
+        val isLive: Boolean,
+        val isStale: Boolean,
+        val avatarId: String?,
+        val lastUpdatedText: String
+    )
+
+    fun getMyLastLatLng(): LatLng? = myLastLatLng
+    fun getPeerRecord(peerId: String): PeerMarkerRecord? = peerRecords[peerId]
+    fun getAllPeerRecords(): Map<String, PeerMarkerRecord> = peerRecords
 
     private var myLastLatLng: LatLng? = null
     private var lastUserInteractionTime: Long = 0L
@@ -155,6 +205,15 @@ class OfflineMapManager(
                     .target(initialTarget)
                     .zoom(initialZoom)
                     .build()
+
+                map.setOnMarkerClickListener { marker ->
+                    handleMarkerClick(marker)
+                    true
+                }
+                map.addOnMapClickListener {
+                    onMapCanvasClicked?.invoke()
+                    false
+                }
 
                 addRouteLayerToStyle(style)
                 reapplyMarkers()
@@ -706,39 +765,107 @@ class OfflineMapManager(
         """.trimIndent()
     }
 
-    private fun reapplyMarkers() {
+    fun setPeersLayerVisible(visible: Boolean) {
+        isPeersLayerVisible = visible
         val map = mapLibreMap ?: return
-        myLastLatLng?.let { latLng ->
-            myMarker = map.addMarker(
-                MarkerOptions()
-                    .position(latLng)
-                    .title("📍 You")
-                    .snippet("Your current GPS position")
-            )
+        if (!visible) {
+            peerMarkers.values.forEach { map.removeMarker(it) }
+            peerMarkers.clear()
+        } else {
+            reapplyPeerMarkers()
         }
+    }
+
+    fun setAlertsLayerVisible(visible: Boolean) {
+        isAlertsLayerVisible = visible
+        val map = mapLibreMap ?: return
+        if (!visible) {
+            alertMarkers.values.forEach { map.removeMarker(it) }
+            alertMarkers.clear()
+        } else {
+            reapplyAlertMarkers()
+        }
+    }
+
+    fun setFacilitiesLayerVisible(visible: Boolean) {
+        isFacilitiesLayerVisible = visible
+        if (!visible) {
+            clearEmergencyPoiMarkers()
+        } else {
+            val savedPois = emergencyPoiRecords.values.toList()
+            if (savedPois.isNotEmpty()) {
+                showEmergencyPoiMarkers(savedPois)
+            }
+        }
+    }
+
+    private fun reapplyPeerMarkers() {
+        val map = mapLibreMap ?: return
         peerMarkers.clear()
-        peerLocationsData.forEach { (peerId, info) ->
-            val (title, latLng, _) = info
+        peerRecords.forEach { (peerId, record) ->
+            val icon = TacticalMarkerHelper.getPeerMarkerIcon(context, record.peerName, record.avatarId, record.isLive)
+            val title = when {
+                record.isStale -> "⚪ ${record.peerName} (Stale)"
+                record.isLive -> "🟢 ${record.peerName} (Live)"
+                else -> "📍 ${record.peerName}"
+            }
+            val snippet = "Coords: ${String.format(java.util.Locale.US, "%.5f, %.5f", record.latLng.latitude, record.latLng.longitude)} • ${record.lastUpdatedText}"
             val marker = map.addMarker(
                 MarkerOptions()
-                    .position(latLng)
+                    .position(record.latLng)
+                    .icon(icon)
                     .title(title)
+                    .snippet(snippet)
             )
             peerMarkers[peerId] = marker
         }
+    }
+
+    private fun reapplyAlertMarkers() {
+        val map = mapLibreMap ?: return
         alertMarkers.clear()
         alertLocationsData.forEach { (alertId, info) ->
             val (title, latLng, dist) = info
+            val icon = TacticalMarkerHelper.getAlertMarkerIcon(context)
             val marker = map.addMarker(
                 MarkerOptions()
                     .position(latLng)
+                    .icon(icon)
                     .title("🚨 $title")
                     .snippet(dist ?: "Alert Location")
             )
             alertMarkers[alertId] = marker
         }
+    }
+
+    private fun reapplyMarkers() {
+        val map = mapLibreMap ?: return
+        myLastLatLng?.let { latLng ->
+            val icon = TacticalMarkerHelper.getSelfMarkerIcon(context)
+            myMarker = map.addMarker(
+                MarkerOptions()
+                    .position(latLng)
+                    .icon(icon)
+                    .title("📍 You")
+                    .snippet("Your current GPS position")
+            )
+        }
+        if (isPeersLayerVisible) {
+            reapplyPeerMarkers()
+        } else {
+            peerMarkers.clear()
+        }
+        if (isAlertsLayerVisible) {
+            reapplyAlertMarkers()
+        } else {
+            alertMarkers.clear()
+        }
         if (poiLocationsData.isNotEmpty()) {
             showPoiMarkers(poiLocationsData)
+        }
+        if (isFacilitiesLayerVisible && emergencyPoiRecords.isNotEmpty()) {
+            val savedPois = emergencyPoiRecords.values.toList()
+            showEmergencyPoiMarkers(savedPois)
         }
     }
 
@@ -757,10 +884,12 @@ class OfflineMapManager(
         myLastLatLng = latLng
 
         val map = mapLibreMap ?: return
+        val icon = TacticalMarkerHelper.getSelfMarkerIcon(context)
         if (myMarker == null) {
             myMarker = map.addMarker(
                 MarkerOptions()
                     .position(latLng)
+                    .icon(icon)
                     .title("📍 You")
                     .snippet("Your current GPS position (±${accuracy.toInt()}m)")
             )
@@ -805,7 +934,8 @@ class OfflineMapManager(
         accuracy: Float = 0f,
         timestamp: Long = System.currentTimeMillis(),
         isLive: Boolean = false,
-        lastUpdatedText: String = "Just now"
+        lastUpdatedText: String = "Just now",
+        avatarId: String? = null
     ) {
         val smoother = peerSmoothers.getOrPut(peerId) { DistanceEngine.CoordinateSmoother() }
         val smoothed = smoother.update(latitude, longitude, accuracy, timestamp)
@@ -822,24 +952,41 @@ class OfflineMapManager(
         }
         val snippet = "Coords: ${String.format(java.util.Locale.US, "%.5f, %.5f", smoothed.latitude, smoothed.longitude)} • $lastUpdatedText"
 
+        val peerRecord = PeerMarkerRecord(
+            peerId = peerId,
+            peerName = peerName,
+            latLng = latLng,
+            isLive = isLive,
+            isStale = isStale,
+            avatarId = avatarId,
+            lastUpdatedText = lastUpdatedText
+        )
+        peerRecords[peerId] = peerRecord
         peerLocationsData[peerId] = Triple(title, latLng, isLive)
-        val existing = peerMarkers[peerId]
-        if (existing != null) {
-            existing.position = latLng
-            existing.title = title
-            existing.snippet = snippet
-        } else {
-            val marker = map.addMarker(
-                MarkerOptions()
-                    .position(latLng)
-                    .title(title)
-                    .snippet(snippet)
-            )
-            peerMarkers[peerId] = marker
+
+        if (isPeersLayerVisible) {
+            val icon = TacticalMarkerHelper.getPeerMarkerIcon(context, peerName, avatarId, isLive)
+            val existing = peerMarkers[peerId]
+            if (existing != null) {
+                existing.position = latLng
+                existing.title = title
+                existing.snippet = snippet
+                existing.icon = icon
+            } else {
+                val marker = map.addMarker(
+                    MarkerOptions()
+                        .position(latLng)
+                        .icon(icon)
+                        .title(title)
+                        .snippet(snippet)
+                )
+                peerMarkers[peerId] = marker
+            }
         }
     }
 
     fun removePeerLocation(peerId: String) {
+        peerRecords.remove(peerId)
         peerLocationsData.remove(peerId)
         peerSmoothers.remove(peerId)
         peerLastSeenTimes.remove(peerId)
@@ -863,20 +1010,25 @@ class OfflineMapManager(
         }
         alertLocationsData[alertId] = Triple(title, latLng, snippet)
 
-        val map = mapLibreMap ?: return
-        val existing = alertMarkers[alertId]
-        if (existing != null) {
-            existing.position = latLng
-            existing.title = "🚨 $title"
-            existing.snippet = snippet
-        } else {
-            val marker = map.addMarker(
-                MarkerOptions()
-                    .position(latLng)
-                    .title("🚨 $title")
-                    .snippet(snippet)
-            )
-            alertMarkers[alertId] = marker
+        if (isAlertsLayerVisible) {
+            val map = mapLibreMap ?: return
+            val icon = TacticalMarkerHelper.getAlertMarkerIcon(context)
+            val existing = alertMarkers[alertId]
+            if (existing != null) {
+                existing.position = latLng
+                existing.title = "🚨 $title"
+                existing.snippet = snippet
+                existing.icon = icon
+            } else {
+                val marker = map.addMarker(
+                    MarkerOptions()
+                        .position(latLng)
+                        .icon(icon)
+                        .title("🚨 $title")
+                        .snippet(snippet)
+                )
+                alertMarkers[alertId] = marker
+            }
         }
     }
 
@@ -886,15 +1038,12 @@ class OfflineMapManager(
         val map = mapLibreMap ?: return
         clearPoiMarkers()
         for (poi in pois) {
-            val icon = when (poi.type) {
-                OverpassPoiEngine.PoiType.HOSPITAL -> "🏥"
-                OverpassPoiEngine.PoiType.PHARMACY -> "💊"
-                OverpassPoiEngine.PoiType.POLICE -> "👮"
-            }
+            val icon = TacticalMarkerHelper.getPoiMarkerIcon(context, poi.type)
             val marker = map.addMarker(
                 MarkerOptions()
                     .position(LatLng(poi.lat, poi.lon))
-                    .title("$icon ${poi.name}")
+                    .icon(icon)
+                    .title(poi.name)
                     .snippet(poi.type.label)
             )
             poiMarkers[poi.id] = marker
@@ -906,6 +1055,83 @@ class OfflineMapManager(
         val map = mapLibreMap ?: return
         poiMarkers.values.forEach { map.removeMarker(it) }
         poiMarkers.clear()
+    }
+
+    /**
+     * Renders category-specific tactical emergency POI markers on the MapLibre canvas.
+     */
+    fun showEmergencyPoiMarkers(pois: List<com.fury.peerconnect.data.EmergencyPoiEntity>) {
+        for (poi in pois) {
+            emergencyPoiRecords[poi.id] = poi
+        }
+        clearEmergencyPoiMarkers()
+        if (!isFacilitiesLayerVisible) return
+        val map = mapLibreMap ?: return
+        for (poi in pois) {
+            val category = poi.getEmergencyCategory() ?: com.fury.peerconnect.data.EmergencyCategory.HOSPITAL
+            val icon = TacticalMarkerHelper.getEmergencyPoiMarkerIcon(context, category)
+            val marker = map.addMarker(
+                MarkerOptions()
+                    .position(LatLng(poi.latitude, poi.longitude))
+                    .icon(icon)
+                    .title(poi.name)
+                    .snippet(category.displayName)
+            )
+            emergencyPoiMarkers[poi.id] = marker
+        }
+        Log.i(TAG, "MAP_POI: Rendered ${pois.size} emergency POI markers")
+    }
+
+    fun clearEmergencyPoiMarkers() {
+        val map = mapLibreMap ?: return
+        emergencyPoiMarkers.values.forEach { map.removeMarker(it) }
+        emergencyPoiMarkers.clear()
+    }
+
+    fun selectEmergencyPoi(poiId: String) {
+        val poi = emergencyPoiRecords[poiId] ?: return
+        focusOnLocation(poi.latitude, poi.longitude, includeMyPosition = false)
+        val distMeters = myLastLatLng?.let {
+            DistanceEngine.calculateDistance(it.latitude, it.longitude, poi.latitude, poi.longitude)
+        }
+        val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+        val category = poi.getEmergencyCategory()
+        val selection = MapSelection(
+            id = poi.id,
+            type = SelectionType.POI,
+            title = poi.name,
+            subtitle = category?.displayName ?: "Emergency Facility",
+            latitude = poi.latitude,
+            longitude = poi.longitude,
+            distanceText = distText,
+            emergencyCategory = category,
+            contactPhone = poi.phone,
+            emergencyPhone = poi.emergencyPhone,
+            address = poi.address,
+            operator = poi.operator,
+            capabilities = poi.capabilities
+        )
+        onMarkerSelected?.invoke(selection)
+    }
+
+    /**
+     * Smoothly animates and fits the map camera to encompass all route coordinates.
+     */
+    fun fitCameraToRoute(points: List<LatLng>, paddingPx: Int = 140) {
+        val map = mapLibreMap ?: return
+        if (points.isEmpty()) return
+        if (points.size == 1) {
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(points[0], 15.0), 800)
+            return
+        }
+        try {
+            val builder = LatLngBounds.Builder()
+            points.forEach { builder.include(it) }
+            val bounds = builder.build()
+            map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, paddingPx), 900)
+        } catch (e: Exception) {
+            Log.w(TAG, "fitCameraToRoute error: ${e.message}")
+        }
     }
 
     fun focusOnLocation(
@@ -927,6 +1153,192 @@ class OfflineMapManager(
             map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 900)
         } else {
             map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 14.5), 800)
+        }
+    }
+
+    fun zoomIn() {
+        lastUserInteractionTime = System.currentTimeMillis()
+        mapLibreMap?.animateCamera(CameraUpdateFactory.zoomIn(), 300)
+    }
+
+    fun zoomOut() {
+        lastUserInteractionTime = System.currentTimeMillis()
+        mapLibreMap?.animateCamera(CameraUpdateFactory.zoomOut(), 300)
+    }
+
+    fun resetNorth() {
+        lastUserInteractionTime = System.currentTimeMillis()
+        mapLibreMap?.let { map ->
+            val currentCamera = map.cameraPosition
+            val newCamera = CameraPosition.Builder(currentCamera)
+                .bearing(0.0)
+                .tilt(0.0)
+                .build()
+            map.animateCamera(CameraUpdateFactory.newCameraPosition(newCamera), 400)
+        }
+    }
+
+    fun selectPeer(peerId: String) {
+        val record = peerRecords[peerId] ?: return
+        focusOnLocation(record.latLng.latitude, record.latLng.longitude, includeMyPosition = false)
+        val distMeters = myLastLatLng?.let {
+            DistanceEngine.calculateDistance(it.latitude, it.longitude, record.latLng.latitude, record.latLng.longitude)
+        }
+        val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+        val selection = MapSelection(
+            id = peerId,
+            type = SelectionType.PEER,
+            title = record.peerName,
+            subtitle = if (record.isLive) "Live Mesh Peer" else if (record.isStale) "Stale Location" else "Mesh Peer",
+            latitude = record.latLng.latitude,
+            longitude = record.latLng.longitude,
+            isLive = record.isLive,
+            isStale = record.isStale,
+            distanceText = distText,
+            avatarId = record.avatarId
+        )
+        onMarkerSelected?.invoke(selection)
+    }
+
+    fun selectAlert(alertId: String) {
+        val info = alertLocationsData[alertId] ?: return
+        val (title, latLng, snippet) = info
+        focusOnLocation(latLng.latitude, latLng.longitude, includeMyPosition = false)
+        val distMeters = myLastLatLng?.let {
+            DistanceEngine.calculateDistance(it.latitude, it.longitude, latLng.latitude, latLng.longitude)
+        }
+        val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+        val selection = MapSelection(
+            id = alertId,
+            type = SelectionType.ALERT,
+            title = title,
+            subtitle = "Emergency Broadcast",
+            latitude = latLng.latitude,
+            longitude = latLng.longitude,
+            distanceText = distText ?: snippet
+        )
+        onMarkerSelected?.invoke(selection)
+    }
+
+    fun selectPoi(poiId: String) {
+        val poi = poiLocationsData.firstOrNull { it.id == poiId } ?: return
+        focusOnLocation(poi.lat, poi.lon, includeMyPosition = false)
+        val distMeters = myLastLatLng?.let {
+            DistanceEngine.calculateDistance(it.latitude, it.longitude, poi.lat, poi.lon)
+        }
+        val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+        val selection = MapSelection(
+            id = poi.id,
+            type = SelectionType.POI,
+            title = poi.name,
+            subtitle = poi.type.label,
+            latitude = poi.lat,
+            longitude = poi.lon,
+            distanceText = distText
+        )
+        onMarkerSelected?.invoke(selection)
+    }
+
+    private fun handleMarkerClick(marker: Marker) {
+        if (myMarker == marker) {
+            val myLat = myLastLatLng?.latitude ?: marker.position.latitude
+            val myLon = myLastLatLng?.longitude ?: marker.position.longitude
+            onMarkerSelected?.invoke(
+                MapSelection(
+                    id = "self",
+                    type = SelectionType.SELF,
+                    title = "You",
+                    subtitle = "Your current GPS fix",
+                    latitude = myLat,
+                    longitude = myLon,
+                    distanceText = "Current Position"
+                )
+            )
+            return
+        }
+
+        for ((peerId, pMarker) in peerMarkers) {
+            if (pMarker == marker) {
+                val rec = peerRecords[peerId]
+                val title = rec?.peerName ?: marker.title ?: "Peer"
+                val subtitle = when {
+                    rec?.isLive == true -> "Live Mesh Peer"
+                    rec?.isStale == true -> "Stale Location • ${rec.lastUpdatedText}"
+                    else -> "Mesh Peer • ${rec?.lastUpdatedText ?: "Recently active"}"
+                }
+                val distMeters = myLastLatLng?.let {
+                    DistanceEngine.calculateDistance(it.latitude, it.longitude, marker.position.latitude, marker.position.longitude)
+                }
+                val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+                onMarkerSelected?.invoke(
+                    MapSelection(
+                        id = peerId,
+                        type = SelectionType.PEER,
+                        title = title,
+                        subtitle = subtitle,
+                        latitude = marker.position.latitude,
+                        longitude = marker.position.longitude,
+                        isLive = rec?.isLive ?: false,
+                        isStale = rec?.isStale ?: false,
+                        distanceText = distText,
+                        avatarId = rec?.avatarId
+                    )
+                )
+                return
+            }
+        }
+
+        for ((alertId, aMarker) in alertMarkers) {
+            if (aMarker == marker) {
+                val alertInfo = alertLocationsData[alertId]
+                val title = alertInfo?.first ?: marker.title?.removePrefix("🚨 ") ?: "Emergency Alert"
+                val distMeters = myLastLatLng?.let {
+                    DistanceEngine.calculateDistance(it.latitude, it.longitude, marker.position.latitude, marker.position.longitude)
+                }
+                val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+                onMarkerSelected?.invoke(
+                    MapSelection(
+                        id = alertId,
+                        type = SelectionType.ALERT,
+                        title = title,
+                        subtitle = "Emergency Broadcast",
+                        latitude = marker.position.latitude,
+                        longitude = marker.position.longitude,
+                        distanceText = distText ?: alertInfo?.third
+                    )
+                )
+                return
+            }
+        }
+
+        for ((poiId, pMarker) in poiMarkers) {
+            if (pMarker == marker) {
+                val poi = poiLocationsData.firstOrNull { it.id == poiId }
+                val title = poi?.name ?: marker.title ?: "Facility"
+                val distMeters = myLastLatLng?.let {
+                    DistanceEngine.calculateDistance(it.latitude, it.longitude, marker.position.latitude, marker.position.longitude)
+                }
+                val distText = distMeters?.let { DistanceEngine.formatDistance(it) }
+                onMarkerSelected?.invoke(
+                    MapSelection(
+                        id = poiId,
+                        type = SelectionType.POI,
+                        title = title,
+                        subtitle = poi?.type?.label ?: "Emergency Facility",
+                        latitude = marker.position.latitude,
+                        longitude = marker.position.longitude,
+                        distanceText = distText
+                    )
+                )
+                return
+            }
+        }
+
+        for ((poiId, eMarker) in emergencyPoiMarkers) {
+            if (eMarker == marker) {
+                selectEmergencyPoi(poiId)
+                return
+            }
         }
     }
 

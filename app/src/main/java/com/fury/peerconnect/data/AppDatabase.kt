@@ -7,11 +7,12 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [PeerEntity::class, MessageEntity::class, AlertEntity::class], version = 12, exportSchema = false)
+@Database(entities = [PeerEntity::class, MessageEntity::class, AlertEntity::class, EmergencyPoiEntity::class], version = 13, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun peerDao(): PeerDao
     abstract fun messageDao(): MessageDao
     abstract fun alertDao(): AlertDao
+    abstract fun emergencyPoiDao(): EmergencyPoiDao
 
     companion object {
         @Volatile
@@ -93,6 +94,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS emergency_pois (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        subCategory TEXT,
+                        latitude REAL NOT NULL,
+                        longitude REAL NOT NULL,
+                        phone TEXT,
+                        emergencyPhone TEXT,
+                        address TEXT,
+                        operator TEXT,
+                        capabilities TEXT,
+                        source TEXT NOT NULL,
+                        isVerified INTEGER NOT NULL DEFAULT 1
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_emergency_pois_category ON emergency_pois(category)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_emergency_pois_coords ON emergency_pois(latitude, longitude)")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -100,7 +127,11 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "peer_connect_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(
+                        MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                        MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
+                        MIGRATION_11_12, MIGRATION_12_13
+                    )
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

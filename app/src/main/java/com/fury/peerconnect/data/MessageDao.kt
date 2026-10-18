@@ -47,6 +47,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE senderId = :senderId AND receiverId = :receiverId AND senderMessageId IS NOT NULL AND deliveryStatus != 'READ'")
     suspend fun getUnreadIncomingMessages(senderId: String, receiverId: String): List<MessageEntity>
 
+    @Query("SELECT COUNT(*) FROM messages WHERE senderMessageId IS NOT NULL AND deliveryStatus != 'READ'")
+    suspend fun getTotalUnreadIncomingCount(): Int
+
     @Query("UPDATE messages SET deliveryStatus = 'READ' WHERE senderId = :senderId AND receiverId = :receiverId AND deliveryStatus != 'READ'")
     suspend fun markIncomingMessagesAsRead(senderId: String, receiverId: String): Int
 

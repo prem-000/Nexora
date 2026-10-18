@@ -29,6 +29,16 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.inputmethod.InputMethodManager
+import com.fury.peerconnect.logic.DistanceEngine
+import com.fury.peerconnect.logic.TacticalMarkerHelper
+import com.fury.peerconnect.data.EmergencyPoiEntity
+import com.fury.peerconnect.data.EmergencyPoiRepository
+import com.fury.peerconnect.logic.routing.OfflineRoutingEngine
+import com.fury.peerconnect.ui.MapSearchResult
+import com.fury.peerconnect.ui.MapSearchResultAdapter
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -83,7 +93,8 @@ import android.widget.RadioGroup
 import android.widget.Spinner
 import android.widget.ArrayAdapter
 import com.fury.peerconnect.logic.CriticalAlertManager
-import com.fury.peerconnect.network.model.EmergencyCategory
+import com.fury.peerconnect.data.EmergencyCategory as EmergencyPoiCategory
+import com.fury.peerconnect.network.model.EmergencyCategory as NetworkEmergencyCategory
 import com.fury.peerconnect.network.model.WireEnvelope
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.ResolvableApiException
@@ -105,6 +116,11 @@ import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -218,6 +234,30 @@ class MainActivity : AppCompatActivity() {
     private var liveSharingStartTime: Long = 0L
 
     private val mapRoutingEngine = com.fury.peerconnect.logic.routing.OnlineRoutingEngine()
+    private lateinit var offlineRoutingEngine: com.fury.peerconnect.logic.routing.OfflineRoutingEngine
+    private lateinit var emergencyPoiRepository: com.fury.peerconnect.data.EmergencyPoiRepository
+    private var activeCategoryFilter: com.fury.peerconnect.data.EmergencyCategory? = null
+
+    private lateinit var textOfflineMapStatus: TextView
+    private lateinit var chipCategoryAll: TextView
+    private lateinit var chipCategoryHospital: TextView
+    private lateinit var chipCategoryPolice: TextView
+    private lateinit var chipCategoryFire: TextView
+    private lateinit var chipCategoryAmbulance: TextView
+    private lateinit var chipCategoryPharmacy: TextView
+    private lateinit var chipCategoryRailwayPolice: TextView
+    private lateinit var chipCategoryRailwayHelp: TextView
+    private lateinit var chipCategoryShelter: TextView
+
+    private lateinit var mapDetailCategoryBadge: TextView
+    private lateinit var mapDetailVerifiedSection: View
+    private lateinit var mapDetailAddressText: TextView
+    private lateinit var mapDetailOperatorText: TextView
+    private lateinit var mapDetailCapabilitiesText: TextView
+    private lateinit var mapDetailContactRow: View
+    private lateinit var mapDetailPhoneText: TextView
+    private lateinit var btnMapCall: View
+
     private lateinit var dashMapView: org.maplibre.android.maps.MapView
     private lateinit var dashMapCoordinatesText: TextView
     private lateinit var mapStatusText: TextView
@@ -230,15 +270,45 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnMapTypeSat: TextView
     private lateinit var btnMapTypeHybrid: TextView
 
+    // Map Redesign Google Maps-style UI elements
+    private lateinit var mapSearchCard: MaterialCardView
+    private lateinit var editMapSearch: EditText
+    private lateinit var btnMapSearchClear: ImageView
+    private lateinit var mapSearchResultsCard: MaterialCardView
+    private lateinit var recyclerMapSearchResults: RecyclerView
+    private lateinit var textMapSearchNotice: TextView
+    private lateinit var mapSearchResultAdapter: MapSearchResultAdapter
+
+    private lateinit var btnMapCompass: View
+    private lateinit var btnMapZoomIn: View
+    private lateinit var btnMapZoomOut: View
+
+    private lateinit var mapDetailsCard: MaterialCardView
+    private lateinit var mapDetailAvatar: com.google.android.material.imageview.ShapeableImageView
+    private lateinit var mapDetailTitle: TextView
+    private lateinit var mapDetailSubtitle: TextView
+    private lateinit var mapDetailCoordinates: TextView
+    private lateinit var mapDetailDistance: TextView
+    private lateinit var textMapOfflineNotice: TextView
+    private lateinit var btnMapDirections: com.google.android.material.button.MaterialButton
+    private lateinit var btnMapMessage: com.google.android.material.button.MaterialButton
+    private lateinit var btnMapClearRoute: View
+    private lateinit var btnMapDetailClose: View
+
     private lateinit var statusText: TextView
     private lateinit var chatStatusText: TextView
     private lateinit var btnAddContact: Button
     private lateinit var layoutConnection: View
     private lateinit var layoutDashboard: View
+    private lateinit var layoutMap: View
     private lateinit var layoutAlerts: View
     private lateinit var layoutSettings: View
     private lateinit var layoutChat: ConstraintLayout
     private lateinit var bottomNavigation: BottomNavigationView
+    private lateinit var bottomNavigationCompose: ComposeView
+    private var currentNavDestination by mutableStateOf(NeXoRaNavDestination.HOME)
+    private var chatsUnreadCountState by mutableIntStateOf(0)
+    private var alertsUnreadCountState by mutableIntStateOf(0)
     private lateinit var appGreeting: TextView
     private lateinit var dashConnStatus: TextView
     private lateinit var dashConnDesc: TextView
@@ -371,16 +441,29 @@ class MainActivity : AppCompatActivity() {
             (findViewById<View>(R.id.alertThreadAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
             (findViewById<View>(R.id.connAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
             (findViewById<View>(R.id.peerProfileAppBar) as? MaterialCardView)?.setContentPadding(0, finalTop, 0, 0)
+
+            val searchCard = findViewById<View>(R.id.mapSearchCard)
+            val searchParams = searchCard?.layoutParams as? ViewGroup.MarginLayoutParams
+            if (searchParams != null) {
+                searchParams.topMargin = finalTop + (12 * resources.displayMetrics.density).toInt()
+                searchCard.layoutParams = searchParams
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error applying top insets", e)
         }
     }
+
+    private var lastBackPressedTime: Long = 0L
 
     private val backPressedCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             try {
                 if (::layoutPeerProfile.isInitialized && layoutPeerProfile.visibility == View.VISIBLE) {
                     closePeerProfile()
+                } else if (::mapSearchResultsCard.isInitialized && mapSearchResultsCard.visibility == View.VISIBLE) {
+                    mapSearchResultsCard.visibility = View.GONE
+                } else if (::mapDetailsCard.isInitialized && mapDetailsCard.visibility == View.VISIBLE && ::layoutMap.isInitialized && layoutMap.visibility == View.VISIBLE) {
+                    mapDetailsCard.visibility = View.GONE
                 } else if (::layoutConnections.isInitialized && layoutConnections.visibility == View.VISIBLE) {
                     layoutConnections.visibility = View.GONE
                 } else if (::layoutAlertThread.isInitialized && layoutAlertThread.visibility == View.VISIBLE) {
@@ -390,12 +473,17 @@ class MainActivity : AppCompatActivity() {
                 } else if (::bottomNavigation.isInitialized && bottomNavigation.selectedItemId != R.id.nav_home) {
                     bottomNavigation.selectedItemId = R.id.nav_home
                 } else {
-                    isEnabled = false
-                    finish()
+                    val now = System.currentTimeMillis()
+                    if (now - lastBackPressedTime < 2000L) {
+                        isEnabled = false
+                        finish()
+                    } else {
+                        lastBackPressedTime = now
+                        Toast.makeText(this@MainActivity, "Press back again to exit", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error in handleOnBackPressed", e)
-                finish()
             }
         }
     }
@@ -876,10 +964,24 @@ class MainActivity : AppCompatActivity() {
         btnAddContact = findViewById(R.id.btnHost)
         layoutDashboard = findViewById(R.id.layoutDashboard)
         layoutConnection = findViewById(R.id.layoutConnection)
+        layoutMap = findViewById(R.id.layoutMap)
         layoutAlerts = findViewById(R.id.layoutAlerts)
         layoutSettings = findViewById(R.id.layoutSettings)
         layoutChat = findViewById(R.id.layoutChat)
         bottomNavigation = findViewById(R.id.bottomNavigation)
+        bottomNavigationCompose = findViewById(R.id.bottomNavigationCompose)
+        bottomNavigationCompose.setContent {
+            NeXoRaBottomNavigationBar(
+                selectedDestination = currentNavDestination,
+                onDestinationSelected = { dest ->
+                    currentNavDestination = dest
+                    bottomNavigation.selectedItemId = dest.id
+                },
+                chatsUnreadCount = chatsUnreadCountState,
+                alertsUnreadCount = alertsUnreadCountState,
+                isDark = false
+            )
+        }
         btnExitChat = findViewById(R.id.btnExitChat)
         dashConnStatus = findViewById(R.id.dashConnStatus)
         dashConnDesc = findViewById(R.id.dashConnDesc)
@@ -990,6 +1092,93 @@ class MainActivity : AppCompatActivity() {
         btnMapTypeSat = findViewById(R.id.btnMapTypeSat)
         btnMapTypeHybrid = findViewById(R.id.btnMapTypeHybrid)
 
+        mapSearchCard = findViewById(R.id.mapSearchCard)
+        editMapSearch = findViewById(R.id.editMapSearch)
+        btnMapSearchClear = findViewById(R.id.btnMapSearchClear)
+        mapSearchResultsCard = findViewById(R.id.mapSearchResultsCard)
+        recyclerMapSearchResults = findViewById(R.id.recyclerMapSearchResults)
+        textMapSearchNotice = findViewById(R.id.textMapSearchNotice)
+
+        btnMapCompass = findViewById(R.id.btnMapCompass)
+        btnMapZoomIn = findViewById(R.id.btnMapZoomIn)
+        btnMapZoomOut = findViewById(R.id.btnMapZoomOut)
+
+        mapDetailsCard = findViewById(R.id.mapDetailsCard)
+        mapDetailAvatar = findViewById(R.id.mapDetailAvatar)
+        mapDetailTitle = findViewById(R.id.mapDetailTitle)
+        mapDetailSubtitle = findViewById(R.id.mapDetailSubtitle)
+        mapDetailCoordinates = findViewById(R.id.mapDetailCoordinates)
+        mapDetailDistance = findViewById(R.id.mapDetailDistance)
+        textMapOfflineNotice = findViewById(R.id.textMapOfflineNotice)
+        btnMapDirections = findViewById(R.id.btnMapDirections)
+        btnMapMessage = findViewById(R.id.btnMapMessage)
+        btnMapClearRoute = findViewById(R.id.btnMapClearRoute)
+        btnMapDetailClose = findViewById(R.id.btnMapDetailClose)
+
+        // Emergency POI views & filter chips
+        textOfflineMapStatus = findViewById(R.id.textOfflineMapStatus)
+        chipCategoryAll = findViewById(R.id.chipCategoryAll)
+        chipCategoryHospital = findViewById(R.id.chipCategoryHospital)
+        chipCategoryPolice = findViewById(R.id.chipCategoryPolice)
+        chipCategoryFire = findViewById(R.id.chipCategoryFire)
+        chipCategoryAmbulance = findViewById(R.id.chipCategoryAmbulance)
+        chipCategoryPharmacy = findViewById(R.id.chipCategoryPharmacy)
+        chipCategoryRailwayPolice = findViewById(R.id.chipCategoryRailwayPolice)
+        chipCategoryRailwayHelp = findViewById(R.id.chipCategoryRailwayHelp)
+        chipCategoryShelter = findViewById(R.id.chipCategoryShelter)
+
+        mapDetailCategoryBadge = findViewById(R.id.mapDetailCategoryBadge)
+        mapDetailVerifiedSection = findViewById(R.id.mapDetailVerifiedSection)
+        mapDetailAddressText = findViewById(R.id.mapDetailAddressText)
+        mapDetailOperatorText = findViewById(R.id.mapDetailOperatorText)
+        mapDetailCapabilitiesText = findViewById(R.id.mapDetailCapabilitiesText)
+        mapDetailContactRow = findViewById(R.id.mapDetailContactRow)
+        mapDetailPhoneText = findViewById(R.id.mapDetailPhoneText)
+        btnMapCall = findViewById(R.id.btnMapCall)
+
+        emergencyPoiRepository = EmergencyPoiRepository.getInstance(this)
+        offlineRoutingEngine = OfflineRoutingEngine(this)
+        setupEmergencyCategoryFilterChips()
+
+        recyclerMapSearchResults.layoutManager = LinearLayoutManager(this)
+        mapSearchResultAdapter = MapSearchResultAdapter { result ->
+            handleSearchResultClick(result)
+        }
+        recyclerMapSearchResults.adapter = mapSearchResultAdapter
+
+        editMapSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val query = s?.toString()?.trim().orEmpty()
+                if (query.isEmpty()) {
+                    btnMapSearchClear.visibility = View.GONE
+                    mapSearchResultsCard.visibility = View.GONE
+                } else {
+                    btnMapSearchClear.visibility = View.VISIBLE
+                    performMapSearch(query)
+                }
+            }
+        })
+
+        btnMapSearchClear.setOnClickListener {
+            editMapSearch.setText("")
+            mapSearchResultsCard.visibility = View.GONE
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(editMapSearch.windowToken, 0)
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(mapSearchCard) { card, insets ->
+            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            val params = card.layoutParams as? ViewGroup.MarginLayoutParams
+            if (params != null) {
+                val baseMargin = (12 * resources.displayMetrics.density).toInt()
+                params.topMargin = statusBarHeight + baseMargin
+                card.layoutParams = params
+            }
+            insets
+        }
+
         btnMapTypeStreet.setOnClickListener {
             setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET)
         }
@@ -1006,6 +1195,19 @@ class MainActivity : AppCompatActivity() {
                 mgr.onCreate(savedInstanceState) {
                     runOnUiThread {
                         startGPSUpdates()
+                        loadEmergencyPois()
+                    }
+                }
+                mgr.onMarkerSelected = { selection ->
+                    runOnUiThread {
+                        showMapDetailsSheet(selection)
+                    }
+                }
+                mgr.onMapCanvasClicked = {
+                    runOnUiThread {
+                        mapSearchResultsCard.visibility = View.GONE
+                        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.hideSoftInputFromWindow(editMapSearch.windowToken, 0)
                     }
                 }
             }
@@ -1022,10 +1224,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        btnMapCompass.setOnClickListener {
+            offlineMapManager?.resetNorth()
+            Toast.makeText(this, "Compass reset to North", Toast.LENGTH_SHORT).show()
+        }
         btnMapRecenter.setOnClickListener {
             offlineMapManager?.recenterMyGPSLocation()
         }
+        btnMapZoomIn.setOnClickListener {
+            offlineMapManager?.zoomIn()
+        }
+        btnMapZoomOut.setOnClickListener {
+            offlineMapManager?.zoomOut()
+        }
         btnMapLayers.setOnClickListener {
+            showMapLayersBottomSheet()
+        }
+        btnMapLayers.setOnLongClickListener {
             offlineMapManager?.cycleMapStyle { activeStyle, message ->
                 runOnUiThread {
                     updateMapTypeSelectorUI(activeStyle)
@@ -1036,6 +1251,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+            true
         }
         btnMapDownloadArea.setOnClickListener {
             Toast.makeText(this, "Pre-fetching offline map tiles (2km radius)...", Toast.LENGTH_SHORT).show()
@@ -1210,6 +1426,7 @@ class MainActivity : AppCompatActivity() {
         updateGreeting()
 
         bottomNavigation.setOnItemSelectedListener { item ->
+            currentNavDestination = NeXoRaNavDestination.fromId(item.itemId)
             val handled = when (item.itemId) {
                 R.id.nav_home -> {
                     showTab(layoutDashboard)
@@ -1220,6 +1437,11 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_messages -> {
                     showTab(layoutConnection)
                     loadPeersFromDb()
+                    true
+                }
+                R.id.nav_map -> {
+                    showTab(layoutMap)
+                    loadEmergencyPois()
                     true
                 }
                 R.id.nav_alerts -> {
@@ -1235,6 +1457,7 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
             updateBackCallbackState()
+            updateNavigationBadges()
             handled
         }
 
@@ -1332,8 +1555,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTab(activeLayout: View) {
+        val mainHeaderCard = findViewById<View>(R.id.mainHeaderCard)
+        mainHeaderCard?.visibility = if (activeLayout == layoutMap) View.GONE else View.VISIBLE
+
         layoutDashboard.visibility = if (activeLayout == layoutDashboard) View.VISIBLE else View.GONE
         layoutConnection.visibility = if (activeLayout == layoutConnection) View.VISIBLE else View.GONE
+        layoutMap.visibility = if (activeLayout == layoutMap) View.VISIBLE else View.GONE
         layoutAlerts.visibility = if (activeLayout == layoutAlerts) View.VISIBLE else View.GONE
         layoutSettings.visibility = if (activeLayout == layoutSettings) View.VISIBLE else View.GONE
     }
@@ -2286,6 +2513,7 @@ class MainActivity : AppCompatActivity() {
 
         cancelNotificationForPeer(peerName)
         unreadMessageCounts.remove(peerName)
+        updateNavigationBadges()
 
         applyGlobalTopInsets(lastKnownStatusBarInset)
         ViewCompat.requestApplyInsets(layoutChat)
@@ -3237,7 +3465,8 @@ class MainActivity : AppCompatActivity() {
                             accuracy = peerAccuracy,
                             timestamp = peerTimestamp,
                             isLive = isLive,
-                            lastUpdatedText = statusLabel
+                            lastUpdatedText = statusLabel,
+                            avatarId = cachedPeerAvatars[senderName]
                         )
                     }
                 }
@@ -3534,7 +3763,7 @@ class MainActivity : AppCompatActivity() {
         val spinnerCriticalCategory = dialogView.findViewById<Spinner>(R.id.spinnerCriticalCategory)
         val spinnerCriticalRadius = dialogView.findViewById<Spinner>(R.id.spinnerCriticalRadius)
 
-        val categories = EmergencyCategory.values().map { it.name.replace("_", " ") }
+        val categories = NetworkEmergencyCategory.values().map { it.name.replace("_", " ") }
         val categoryAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
         spinnerCriticalCategory.adapter = categoryAdapter
 
@@ -3572,7 +3801,7 @@ class MainActivity : AppCompatActivity() {
             val rawDesc = editAlertDesc.text.toString().trim()
             val isCritical = radioCriticalEmergency.isChecked
             val selectedCategory = if (isCritical) {
-                EmergencyCategory.values().getOrNull(spinnerCriticalCategory.selectedItemPosition) ?: EmergencyCategory.OTHER
+                NetworkEmergencyCategory.values().getOrNull(spinnerCriticalCategory.selectedItemPosition) ?: NetworkEmergencyCategory.OTHER
             } else null
 
             val desc = if (rawDesc.isNotEmpty()) {
@@ -3633,7 +3862,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun broadcastCriticalEmergency(
         desc: String,
-        category: EmergencyCategory,
+        category: NetworkEmergencyCategory,
         radiusMeters: Double?,
         latitude: Double?,
         longitude: Double?,
@@ -3994,6 +4223,7 @@ class MainActivity : AppCompatActivity() {
                 if (alertAdapter.getDisplayedCount() > 0) {
                     alertsRecyclerView.scrollToPosition(0)
                 }
+                updateNavigationBadges()
             }
         }
     }
@@ -4508,6 +4738,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun updateNavigationBadges() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val unreadChats = unreadMessageCounts.values.sum()
+            val unreadAlerts = try {
+                db.alertDao().getUnreadAlertCount()
+            } catch (_: Exception) {
+                0
+            }
+            withContext(Dispatchers.Main) {
+                chatsUnreadCountState = unreadChats
+                alertsUnreadCountState = unreadAlerts
+
+                if (::bottomNavigation.isInitialized) {
+                    if (unreadChats > 0) {
+                        val badge = bottomNavigation.getOrCreateBadge(R.id.nav_messages)
+                        badge.isVisible = true
+                        badge.number = unreadChats
+                        badge.backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.nexora_red)
+                    } else {
+                        bottomNavigation.removeBadge(R.id.nav_messages)
+                    }
+
+                    if (unreadAlerts > 0) {
+                        val badge = bottomNavigation.getOrCreateBadge(R.id.nav_alerts)
+                        badge.isVisible = true
+                        badge.number = unreadAlerts
+                        badge.backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.nexora_red)
+                    } else {
+                        bottomNavigation.removeBadge(R.id.nav_alerts)
+                    }
+                }
+            }
+        }
+    }
+
     private fun recordInboundMessage(key: String): Boolean {
         synchronized(processedInboundMessages) {
             if (processedInboundMessages.contains(key)) {
@@ -4572,6 +4837,7 @@ class MainActivity : AppCompatActivity() {
         val notificationId = getNotificationIdForPeer(senderName)
         val unreadCount = (unreadMessageCounts[senderName] ?: 0) + 1
         unreadMessageCounts[senderName] = unreadCount
+        updateNavigationBadges()
 
         createNotificationChannelIfNeeded()
 
@@ -4647,6 +4913,7 @@ class MainActivity : AppCompatActivity() {
         handleChatIntent(intent)
         loadPeersFromDb()
         loadRecentActivityFromDb()
+        updateNavigationBadges()
     }
 
     override fun onPause() {
@@ -4687,6 +4954,11 @@ class MainActivity : AppCompatActivity() {
                 val initial = locationManagerHelper.getCurrentLocation()
                 if (initial != null) {
                     onGPSCoordinatesAcquired(initial)
+                } else {
+                    runOnUiThread {
+                        dashMapCoordinatesText.text = "GPS acquiring…"
+                        textOfflineMapStatus.text = "● Offline map available"
+                    }
                 }
 
                 // Subscribe to continuous offline GPS flow (throttled 20s or 10m)
@@ -4696,6 +4968,9 @@ class MainActivity : AppCompatActivity() {
                     }
             } catch (e: Exception) {
                 Log.w(TAG, "GPS updates initialization error", e)
+                runOnUiThread {
+                    dashMapCoordinatesText.text = "GPS unavailable"
+                }
             }
         }
     }
@@ -4703,7 +4978,8 @@ class MainActivity : AppCompatActivity() {
     private fun onGPSCoordinatesAcquired(coords: com.fury.peerconnect.logic.LocationManagerHelper.GeoCoordinates) {
         myCurrentCoordinates = coords
         runOnUiThread {
-            dashMapCoordinatesText.text = "GPS: ${String.format(Locale.US, "%.5f, %.5f", coords.latitude, coords.longitude)}"
+            dashMapCoordinatesText.text = "GPS active · ±${coords.accuracy.toInt()} m"
+            textOfflineMapStatus.text = "● Offline map available"
             offlineMapManager?.updateMyGPSLocation(
                 latitude = coords.latitude,
                 longitude = coords.longitude,
@@ -4715,16 +4991,389 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupEmergencyCategoryFilterChips() {
+        val chips = listOf(
+            chipCategoryAll to null,
+            chipCategoryHospital to EmergencyPoiCategory.HOSPITAL,
+            chipCategoryPolice to EmergencyPoiCategory.POLICE,
+            chipCategoryFire to EmergencyPoiCategory.FIRE_STATION,
+            chipCategoryAmbulance to EmergencyPoiCategory.AMBULANCE,
+            chipCategoryPharmacy to EmergencyPoiCategory.PHARMACY,
+            chipCategoryRailwayPolice to EmergencyPoiCategory.RAILWAY_POLICE,
+            chipCategoryRailwayHelp to EmergencyPoiCategory.RAILWAY_HELP,
+            chipCategoryShelter to EmergencyPoiCategory.SHELTER
+        )
+        chips.forEach { (chip, category) ->
+            chip.setOnClickListener {
+                setEmergencyCategoryFilter(category)
+            }
+        }
+    }
+
+    private fun setEmergencyCategoryFilter(category: EmergencyPoiCategory?) {
+        activeCategoryFilter = category
+        val allChips = listOf(
+            chipCategoryAll to null,
+            chipCategoryHospital to EmergencyPoiCategory.HOSPITAL,
+            chipCategoryPolice to EmergencyPoiCategory.POLICE,
+            chipCategoryFire to EmergencyPoiCategory.FIRE_STATION,
+            chipCategoryAmbulance to EmergencyPoiCategory.AMBULANCE,
+            chipCategoryPharmacy to EmergencyPoiCategory.PHARMACY,
+            chipCategoryRailwayPolice to EmergencyPoiCategory.RAILWAY_POLICE,
+            chipCategoryRailwayHelp to EmergencyPoiCategory.RAILWAY_HELP,
+            chipCategoryShelter to EmergencyPoiCategory.SHELTER
+        )
+        for ((chip, cat) in allChips) {
+            val isActive = cat == activeCategoryFilter
+            chip.setBackgroundResource(if (isActive) R.drawable.bg_category_chip_active else R.drawable.bg_category_chip_inactive)
+            chip.setTextColor(Color.parseColor(if (isActive) "#FFFFFF" else "#F5F7FA"))
+        }
+
+        val currentQuery = editMapSearch.text?.toString()?.trim().orEmpty()
+        if (currentQuery.isNotEmpty()) {
+            performMapSearch(currentQuery)
+        } else {
+            loadEmergencyPois()
+        }
+    }
+
+    private fun loadEmergencyPois() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val pois = emergencyPoiRepository.getAllPois(activeCategoryFilter)
+                withContext(Dispatchers.Main) {
+                    offlineMapManager?.showEmergencyPoiMarkers(pois)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load emergency POIs", e)
+            }
+        }
+    }
+
+    private fun handleSearchResultClick(result: MapSearchResult) {
+        mapSearchResultsCard.visibility = View.GONE
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(editMapSearch.windowToken, 0)
+
+        when (result.type) {
+            MapSearchResult.Type.PEER -> {
+                if (result.latitude != null && result.longitude != null) {
+                    offlineMapManager?.selectPeer(result.id)
+                } else {
+                    Toast.makeText(this, "${result.title} has not broadcasted GPS coordinates yet", Toast.LENGTH_SHORT).show()
+                }
+            }
+            MapSearchResult.Type.ALERT -> {
+                offlineMapManager?.selectAlert(result.id)
+            }
+            MapSearchResult.Type.POI -> {
+                offlineMapManager?.selectEmergencyPoi(result.id)
+            }
+        }
+    }
+
+    private fun performMapSearch(query: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val results = mutableListOf<MapSearchResult>()
+            val myCoords = myCurrentCoordinates
+
+            // 1. Search known peers
+            try {
+                val allPeers = db.peerDao().getAllPeers()
+                allPeers.filter { it.name.contains(query, ignoreCase = true) }.forEach { peer ->
+                    val peerMarker = offlineMapManager?.getPeerRecord(peer.name)
+                    val lat = peerMarker?.latLng?.latitude
+                    val lon = peerMarker?.latLng?.longitude
+                    val distStr = if (myCoords != null && lat != null && lon != null) {
+                        val d = DistanceEngine.calculateHaversineDistance(myCoords.latitude, myCoords.longitude, lat, lon)
+                        DistanceEngine.formatDistance(d)
+                    } else null
+
+                    results.add(
+                        MapSearchResult(
+                            id = peer.name,
+                            type = MapSearchResult.Type.PEER,
+                            title = peer.name,
+                            subtitle = if (peerMarker?.isLive == true) "Live Mesh Peer" else if (lat != null) "Mesh Peer Location" else "Saved Peer (No GPS)",
+                            distanceText = distStr,
+                            latitude = lat,
+                            longitude = lon,
+                            avatarId = peer.avatarId ?: cachedPeerAvatars[peer.name],
+                            isLive = peerMarker?.isLive ?: false
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Search peers error", e)
+            }
+
+            // 2. Search alerts
+            try {
+                val alerts = db.alertDao().getAllAlerts()
+                alerts.filter {
+                    it.title.contains(query, ignoreCase = true) ||
+                    it.description.contains(query, ignoreCase = true) ||
+                    (it.peerName?.contains(query, ignoreCase = true) == true)
+                }.forEach { alert ->
+                    val distStr = if (myCoords != null && alert.latitude != null && alert.longitude != null) {
+                        val d = DistanceEngine.calculateHaversineDistance(myCoords.latitude, myCoords.longitude, alert.latitude, alert.longitude)
+                        DistanceEngine.formatDistance(d)
+                    } else null
+
+                    results.add(
+                        MapSearchResult(
+                            id = alert.id.toString(),
+                            type = MapSearchResult.Type.ALERT,
+                            title = alert.title,
+                            subtitle = "Emergency Broadcast • ${alert.category}",
+                            distanceText = distStr,
+                            latitude = alert.latitude,
+                            longitude = alert.longitude
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Search alerts error", e)
+            }
+
+            // 3. Search local Emergency POIs (100% offline from Room database)
+            try {
+                val pois = emergencyPoiRepository.searchPois(query, activeCategoryFilter)
+                pois.forEach { poi ->
+                    val distStr = if (myCoords != null) {
+                        val d = DistanceEngine.calculateHaversineDistance(myCoords.latitude, myCoords.longitude, poi.latitude, poi.longitude)
+                        DistanceEngine.formatDistance(d)
+                    } else null
+
+                    val category = poi.getEmergencyCategory()
+                    results.add(
+                        MapSearchResult(
+                            id = poi.id,
+                            type = MapSearchResult.Type.POI,
+                            title = poi.name,
+                            subtitle = category?.displayName ?: poi.category,
+                            distanceText = distStr,
+                            latitude = poi.latitude,
+                            longitude = poi.longitude,
+                            emergencyCategory = category,
+                            verifiedContact = poi.emergencyPhone ?: poi.phone
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Search emergency POIs error", e)
+            }
+
+            withContext(Dispatchers.Main) {
+                if (results.isNotEmpty()) {
+                    mapSearchResultAdapter.submitList(results)
+                    recyclerMapSearchResults.visibility = View.VISIBLE
+                    textMapSearchNotice.visibility = View.GONE
+                    mapSearchResultsCard.visibility = View.VISIBLE
+                } else {
+                    recyclerMapSearchResults.visibility = View.GONE
+                    val catSuffix = if (activeCategoryFilter != null) " in ${activeCategoryFilter?.displayName}" else ""
+                    textMapSearchNotice.text = "No local results for '$query'$catSuffix.\nOffline search queries active mesh peers, alerts, and verified emergency facilities."
+                    textMapSearchNotice.visibility = View.VISIBLE
+                    mapSearchResultsCard.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    private fun showMapDetailsSheet(selection: com.fury.peerconnect.logic.OfflineMapManager.MapSelection) {
+        mapDetailTitle.text = selection.title
+        mapDetailSubtitle.text = selection.subtitle
+        mapDetailCoordinates.text = String.format(Locale.US, "Coords: %.5f, %.5f", selection.latitude, selection.longitude)
+        mapDetailDistance.text = selection.distanceText ?: ""
+        mapDetailDistance.visibility = if (selection.distanceText.isNullOrBlank()) View.GONE else View.VISIBLE
+
+        // Emergency Category Badge
+        if (selection.emergencyCategory != null) {
+            mapDetailCategoryBadge.visibility = View.VISIBLE
+            mapDetailCategoryBadge.text = selection.emergencyCategory.displayName.uppercase()
+            try {
+                mapDetailCategoryBadge.setTextColor(Color.parseColor(selection.emergencyCategory.badgeColorHex))
+            } catch (e: Exception) {
+                mapDetailCategoryBadge.setTextColor(Color.parseColor("#0284C7"))
+            }
+        } else {
+            mapDetailCategoryBadge.visibility = View.GONE
+        }
+
+        // Verified details section
+        var hasVerifiedSection = false
+
+        if (!selection.address.isNullOrBlank()) {
+            mapDetailAddressText.text = "📍 ${selection.address}"
+            mapDetailAddressText.visibility = View.VISIBLE
+            hasVerifiedSection = true
+        } else {
+            mapDetailAddressText.visibility = View.GONE
+        }
+
+        if (!selection.operator.isNullOrBlank()) {
+            mapDetailOperatorText.text = "Authority: ${selection.operator}"
+            mapDetailOperatorText.visibility = View.VISIBLE
+            hasVerifiedSection = true
+        } else {
+            mapDetailOperatorText.visibility = View.GONE
+        }
+
+        if (!selection.capabilities.isNullOrBlank()) {
+            mapDetailCapabilitiesText.text = "Services: ${selection.capabilities}"
+            mapDetailCapabilitiesText.visibility = View.VISIBLE
+            hasVerifiedSection = true
+        } else {
+            mapDetailCapabilitiesText.visibility = View.GONE
+        }
+
+        val dialPhone = selection.emergencyPhone ?: selection.contactPhone
+        if (!dialPhone.isNullOrBlank()) {
+            mapDetailPhoneText.text = "Helpline: $dialPhone"
+            mapDetailContactRow.visibility = View.VISIBLE
+            btnMapCall.setOnClickListener {
+                try {
+                    val dialUri = Uri.parse("tel:${dialPhone.replace(" ", "")}")
+                    val dialIntent = Intent(Intent.ACTION_DIAL, dialUri)
+                    startActivity(dialIntent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Could not open dialer for $dialPhone", Toast.LENGTH_SHORT).show()
+                }
+            }
+            hasVerifiedSection = true
+        } else {
+            mapDetailContactRow.visibility = View.GONE
+        }
+
+        mapDetailVerifiedSection.visibility = if (hasVerifiedSection) View.VISIBLE else View.GONE
+
+        when (selection.type) {
+            com.fury.peerconnect.logic.OfflineMapManager.SelectionType.PEER -> {
+                AvatarManager.loadAvatar(mapDetailAvatar, selection.avatarId ?: cachedPeerAvatars[selection.title])
+                btnMapMessage.visibility = View.VISIBLE
+                btnMapMessage.setOnClickListener {
+                    openChat(selection.title, null)
+                }
+            }
+            com.fury.peerconnect.logic.OfflineMapManager.SelectionType.ALERT -> {
+                mapDetailAvatar.setImageResource(R.drawable.ic_nav_alerts)
+                mapDetailAvatar.imageTintList = ColorStateList.valueOf(Color.parseColor("#EF4444"))
+                btnMapMessage.visibility = View.GONE
+            }
+            com.fury.peerconnect.logic.OfflineMapManager.SelectionType.POI -> {
+                val iconRes = when (selection.emergencyCategory) {
+                    EmergencyPoiCategory.HOSPITAL -> R.drawable.ic_attach_location
+                    EmergencyPoiCategory.POLICE -> R.drawable.ic_contact
+                    EmergencyPoiCategory.FIRE_STATION -> R.drawable.ic_nav_alerts
+                    EmergencyPoiCategory.AMBULANCE -> R.drawable.ic_attach_location
+                    EmergencyPoiCategory.PHARMACY -> R.drawable.ic_attach_location
+                    EmergencyPoiCategory.RAILWAY_POLICE -> R.drawable.ic_contact
+                    EmergencyPoiCategory.RAILWAY_HELP -> R.drawable.ic_attach_location
+                    EmergencyPoiCategory.SHELTER -> R.drawable.ic_contact
+                    else -> R.drawable.ic_attach_location
+                }
+                mapDetailAvatar.setImageResource(iconRes)
+                val badgeColor = selection.emergencyCategory?.badgeColorHex ?: "#38BDF8"
+                mapDetailAvatar.imageTintList = ColorStateList.valueOf(Color.parseColor(badgeColor))
+                btnMapMessage.visibility = View.GONE
+            }
+            com.fury.peerconnect.logic.OfflineMapManager.SelectionType.SELF -> {
+                mapDetailAvatar.setImageResource(R.drawable.ic_contact)
+                mapDetailAvatar.imageTintList = ColorStateList.valueOf(Color.parseColor("#0284C7"))
+                btnMapMessage.visibility = View.GONE
+            }
+        }
+
+        btnMapDirections.setOnClickListener {
+            requestRouteTo(selection.latitude, selection.longitude, selection.title)
+        }
+
+        btnMapClearRoute.setOnClickListener {
+            offlineMapManager?.clearRoute()
+            mapDistanceMeasureText.text = ""
+            textMapOfflineNotice.visibility = View.GONE
+            btnMapClearRoute.visibility = View.GONE
+        }
+
+        btnMapDetailClose.setOnClickListener {
+            mapDetailsCard.visibility = View.GONE
+        }
+
+        mapDetailsCard.visibility = View.VISIBLE
+    }
+
+    private fun requestRouteTo(lat: Double, lon: Double, title: String) {
+        val myCoords = myCurrentCoordinates
+        val haversineStr = if (myCoords != null) {
+            val distMeters = DistanceEngine.calculateHaversineDistance(
+                myCoords.latitude, myCoords.longitude, lat, lon
+            )
+            DistanceEngine.formatDistance(distMeters)
+        } else null
+
+        mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (calculating...)" else "Calculating..."
+        mapStatusText.text = "📍 '$title' • Calculating offline route…"
+        textMapOfflineNotice.visibility = View.GONE
+
+        if (myCoords == null) {
+            mapStatusText.text = "📍 '$title' • Acquiring GPS position…"
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 100% offline routing using local road network graph
+            val routeResult = try {
+                offlineRoutingEngine.calculateRoute(
+                    myCoords.latitude, myCoords.longitude, lat, lon
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Offline routing engine error: ${e.message}")
+                null
+            }
+
+            withContext(Dispatchers.Main) {
+                if (routeResult != null && routeResult.points.isNotEmpty()) {
+                    offlineMapManager?.drawOsrmRoute(routeResult.points)
+                    offlineMapManager?.fitCameraToRoute(routeResult.points)
+                    val routeLabel = offlineRoutingEngine.formatRouteSummary(routeResult)
+                    mapDistanceMeasureText.text = routeLabel
+                    mapStatusText.text = "📍 '$title' • Road Navigation (Offline)"
+                    textMapOfflineNotice.visibility = View.GONE
+                    btnMapClearRoute.visibility = View.VISIBLE
+                } else {
+                    // Explicit offline fallback: NEVER draw straight line as road route
+                    offlineMapManager?.clearRoute()
+                    mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (direct line)" else ""
+                    
+                    val noticeText = when (offlineRoutingEngine.lastRoutingStatus) {
+                        OfflineRoutingEngine.RoutingStatus.OUT_OF_COVERAGE -> 
+                            "Offline notice: Destination outside provisioned road network graph. Direct straight-line bearing shown."
+                        OfflineRoutingEngine.RoutingStatus.ROUTING_DATA_UNAVAILABLE ->
+                            "Offline notice: Local road network data unavailable. Direct straight-line bearing shown."
+                        OfflineRoutingEngine.RoutingStatus.NO_PATH_FOUND ->
+                            "Offline notice: No road route found in local network graph. Direct straight-line bearing shown."
+                        else ->
+                            "Offline notice: Direct straight-line bearing shown (no road graph match)."
+                    }
+                    mapStatusText.text = "📍 '$title' • Straight-line bearing"
+                    textMapOfflineNotice.text = noticeText
+                    textMapOfflineNotice.visibility = View.VISIBLE
+                    btnMapClearRoute.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
     private fun showLocationOnDashboardMap(lat: Double, lon: Double, title: String) {
         runOnUiThread {
             layoutChat.visibility = View.GONE
             layoutAlertThread.visibility = View.GONE
-            showTab(layoutDashboard)
-            bottomNavigation.selectedItemId = R.id.nav_home
+            showTab(layoutMap)
+            bottomNavigation.selectedItemId = R.id.nav_map
             updateBackCallbackState()
 
             offlineMapManager?.focusOnLocation(lat, lon, includeMyPosition = true)
-            offlineMapManager?.clearRoute()
 
             val my = myCurrentCoordinates
             val haversineStr = if (my != null) {
@@ -4734,51 +5383,31 @@ class MainActivity : AppCompatActivity() {
                 com.fury.peerconnect.logic.DistanceEngine.formatDistance(distMeters)
             } else null
 
-            // Show immediate approx distance while route loads
-            mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (approx.)" else ""
-            mapStatusText.text = "📍 '$title' • ${if (haversineStr != null) "Route: Loading…" else "Viewing location"}"
+            val selection = com.fury.peerconnect.logic.OfflineMapManager.MapSelection(
+                id = title,
+                type = com.fury.peerconnect.logic.OfflineMapManager.SelectionType.PEER,
+                title = title,
+                subtitle = "Shared Location",
+                latitude = lat,
+                longitude = lon,
+                distanceText = haversineStr,
+                avatarId = cachedPeerAvatars[title]
+            )
+            showMapDetailsSheet(selection)
+            requestRouteTo(lat, lon, title)
 
-            // Online road-following route calculation + Overpass POI — runs off main thread
+            // Local Emergency POIs near destination (100% offline from Room database)
             lifecycleScope.launch(Dispatchers.IO) {
-                val myCoords = myCurrentCoordinates
-                if (myCoords != null) {
-                    val routeResult = try {
-                        mapRoutingEngine.calculateRoute(
-                            myCoords.latitude, myCoords.longitude, lat, lon
-                        )
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Route calculation error: ${e.message}")
-                        null
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        if (routeResult != null && routeResult.points.isNotEmpty()) {
-                            offlineMapManager?.drawOsrmRoute(routeResult.points)
-                            val routeLabel = mapRoutingEngine.formatRouteSummary(routeResult)
-                            mapDistanceMeasureText.text = routeLabel
-                            mapStatusText.text = "📍 '$title' • $routeLabel"
-                        } else {
-                            // Offline fallback: no road route drawn, show approx haversine
-                            offlineMapManager?.clearRoute()
-                            mapDistanceMeasureText.text = if (haversineStr != null) "~$haversineStr (approx.)" else ""
-                            mapStatusText.text = "📍 '$title'${if (haversineStr != null) " • ~$haversineStr straight-line (offline)" else ""}"
-                        }
-                    }
-                }
-
-                // ─── Overpass POI (Task 7) ───────────────────────────────────────
                 val pois = try {
-                    com.fury.peerconnect.logic.OverpassPoiEngine.fetchPois(
-                        applicationContext, lat, lon
-                    )
+                    emergencyPoiRepository.getPoisNear(lat, lon, radiusMeters = 25000.0)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Overpass POI error: ${e.message}")
+                    Log.w(TAG, "Local POI fetch error: ${e.message}")
                     emptyList()
                 }
 
                 if (pois.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        offlineMapManager?.showPoiMarkers(pois)
+                        offlineMapManager?.showEmergencyPoiMarkers(pois)
                     }
                 }
             }
@@ -4814,6 +5443,84 @@ class MainActivity : AppCompatActivity() {
         btnMapTypeHybrid.setTextColor(if (activeStyle == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID) activeTextColor else inactiveTextColor)
     }
 
+    private fun showMapLayersBottomSheet() {
+        val dialog = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        val sheetView = layoutInflater.inflate(R.layout.bottom_sheet_map_layers, null)
+        dialog.setContentView(sheetView)
+
+        val cardStreet = sheetView.findViewById<View>(R.id.cardMapTypeStreet)
+        val cardSatellite = sheetView.findViewById<View>(R.id.cardMapTypeSatellite)
+        val cardHybrid = sheetView.findViewById<View>(R.id.cardMapTypeHybrid)
+        val textStreet = sheetView.findViewById<TextView>(R.id.textMapTypeStreet)
+        val textSatellite = sheetView.findViewById<TextView>(R.id.textMapTypeSatellite)
+        val textHybrid = sheetView.findViewById<TextView>(R.id.textMapTypeHybrid)
+
+        val switchPeers = sheetView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switchLayerPeers)
+        val switchAlerts = sheetView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switchLayerAlerts)
+        val switchPois = sheetView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switchLayerPois)
+        val btnClose = sheetView.findViewById<View>(R.id.btnLayersClose)
+        val btnPrefetch = sheetView.findViewById<View>(R.id.btnLayersPrefetch)
+
+        fun updateSheetSelection(style: com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle) {
+            val green = Color.parseColor("#16A765")
+            val gray = Color.parseColor("#6B7280")
+            cardStreet.setBackgroundResource(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET) R.drawable.bg_layer_card_selected else R.drawable.bg_layer_card_normal)
+            textStreet.setTextColor(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET) green else gray)
+
+            cardSatellite.setBackgroundResource(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE) R.drawable.bg_layer_card_selected else R.drawable.bg_layer_card_normal)
+            textSatellite.setTextColor(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE) green else gray)
+
+            cardHybrid.setBackgroundResource(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID) R.drawable.bg_layer_card_selected else R.drawable.bg_layer_card_normal)
+            textHybrid.setTextColor(if (style == com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID) green else gray)
+        }
+
+        val currentStyle = offlineMapManager?.getCurrentMapStyle() ?: com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET
+        updateSheetSelection(currentStyle)
+
+        cardStreet.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET)
+            updateSheetSelection(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.STREET)
+        }
+        cardSatellite.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE)
+            updateSheetSelection(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.SATELLITE)
+        }
+        cardHybrid.setOnClickListener {
+            setDashboardMapStyle(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID)
+            updateSheetSelection(com.fury.peerconnect.logic.OfflineMapManager.MapLayerStyle.HYBRID)
+        }
+
+        switchPeers.isChecked = offlineMapManager?.isPeersLayerVisible ?: true
+        switchPeers.setOnCheckedChangeListener { _, isChecked ->
+            offlineMapManager?.setPeersLayerVisible(isChecked)
+        }
+
+        switchAlerts.isChecked = offlineMapManager?.isAlertsLayerVisible ?: true
+        switchAlerts.setOnCheckedChangeListener { _, isChecked ->
+            offlineMapManager?.setAlertsLayerVisible(isChecked)
+        }
+
+        switchPois.isChecked = offlineMapManager?.isFacilitiesLayerVisible ?: true
+        switchPois.setOnCheckedChangeListener { _, isChecked ->
+            offlineMapManager?.setFacilitiesLayerVisible(isChecked)
+        }
+
+        btnPrefetch.setOnClickListener {
+            Toast.makeText(this, "Pre-fetching offline map tiles (2km radius)...", Toast.LENGTH_SHORT).show()
+            offlineMapManager?.downloadAreaForOffline { count ->
+                runOnUiThread {
+                    Toast.makeText(this, "Offline map ready ($count tiles cached)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
     /**
      * Calculates and renders a road-following route between two arbitrary coordinates (e.g. Peer A -> Peer B).
      */
@@ -4828,8 +5535,8 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             layoutChat.visibility = View.GONE
             layoutAlertThread.visibility = View.GONE
-            showTab(layoutDashboard)
-            bottomNavigation.selectedItemId = R.id.nav_home
+            showTab(layoutMap)
+            bottomNavigation.selectedItemId = R.id.nav_map
             updateBackCallbackState()
 
             offlineMapManager?.focusOnLocation(toLat, toLon, includeMyPosition = false)
@@ -4844,7 +5551,7 @@ class MainActivity : AppCompatActivity() {
 
             lifecycleScope.launch(Dispatchers.IO) {
                 val routeResult = try {
-                    mapRoutingEngine.calculateRoute(fromLat, fromLon, toLat, toLon)
+                    offlineRoutingEngine.calculateRoute(fromLat, fromLon, toLat, toLon)
                 } catch (e: Exception) {
                     Log.w(TAG, "Route calculation error: ${e.message}")
                     null
@@ -4853,13 +5560,16 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     if (routeResult != null && routeResult.points.isNotEmpty()) {
                         offlineMapManager?.drawOsrmRoute(routeResult.points)
-                        val routeLabel = mapRoutingEngine.formatRouteSummary(routeResult)
+                        offlineMapManager?.fitCameraToRoute(routeResult.points)
+                        val routeLabel = offlineRoutingEngine.formatRouteSummary(routeResult)
                         mapDistanceMeasureText.text = routeLabel
                         mapStatusText.text = "📍 '$fromTitle' ➔ '$toTitle' • $routeLabel"
+                        btnMapClearRoute.visibility = View.VISIBLE
                     } else {
                         offlineMapManager?.clearRoute()
                         mapDistanceMeasureText.text = "~$haversineStr (approx.)"
                         mapStatusText.text = "📍 '$fromTitle' ➔ '$toTitle' • ~$haversineStr straight-line (offline)"
+                        btnMapClearRoute.visibility = View.VISIBLE
                     }
                 }
             }

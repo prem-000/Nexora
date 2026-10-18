@@ -26,6 +26,9 @@ interface AlertDao {
     @Query("SELECT * FROM alerts WHERE isCustodyActive = 1 AND (expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
     suspend fun getActiveCustodyAlerts(now: Long): List<AlertEntity>
 
+    @Query("SELECT COUNT(*) FROM alerts WHERE isRead = 0")
+    suspend fun getUnreadAlertCount(): Int
+
     @Query("UPDATE alerts SET isRead = 1 WHERE isRead = 0")
     suspend fun markAllAsRead()
 

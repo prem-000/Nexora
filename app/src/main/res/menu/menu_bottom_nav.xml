@@ -1,19 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
-        android:icon="@drawable/ic_nav_home"
         android:id="@+id/nav_home"
-        android:title="Dashboard"/>
+        android:icon="@drawable/ic_nav_home"
+        android:title=""
+        android:contentDescription="Home"
+        app:showAsAction="always" />
     <item
-        android:icon="@drawable/ic_nav_messages"
         android:id="@+id/nav_messages"
-        android:title="Messages"/>
+        android:icon="@drawable/ic_nav_messages"
+        android:title=""
+        android:contentDescription="Chats"
+        app:showAsAction="always" />
     <item
-        android:icon="@drawable/ic_nav_alerts"
+        android:id="@+id/nav_map"
+        android:icon="@drawable/ic_nav_map"
+        android:title=""
+        android:contentDescription="Map"
+        app:showAsAction="always" />
+    <item
         android:id="@+id/nav_alerts"
-        android:title="Alerts"/>
+        android:icon="@drawable/ic_nav_alerts"
+        android:title=""
+        android:contentDescription="Alerts"
+        app:showAsAction="always" />
     <item
-        android:icon="@drawable/ic_nav_settings"
         android:id="@+id/nav_settings"
-        android:title="Settings"/>
+        android:icon="@drawable/ic_nav_settings"
+        android:title=""
+        android:contentDescription="Settings"
+        app:showAsAction="always" />
 </menu>

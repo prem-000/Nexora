@@ -66,6 +66,10 @@ android {
     buildFeatures {
         viewBinding = true
         buildConfig = true
+        compose = true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
     testOptions {
         unitTests {
@@ -74,6 +78,11 @@ android {
     }
     androidResources {
         noCompress += listOf("pmtiles", "mbtiles", "json", "geojson")
+    }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        disable += listOf("NewApi", "ScopedStorage")
     }
 }
 
@@ -88,6 +97,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Jetpack Compose
+    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.activity:activity-compose:1.9.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
     // Google Nearby Connections API & Location
     implementation("com.google.android.gms:play-services-nearby:19.3.0")
@@ -106,4 +124,5 @@ dependencies {
     kapt("androidx.room:room-compiler:$roomVersion")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

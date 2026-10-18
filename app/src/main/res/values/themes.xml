@@ -4,6 +4,7 @@
         <item name="android:windowBackground">@color/nexora_bg</item>
         <item name="android:statusBarColor">@color/nexora_surface</item>
         <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/nexora_surface</item>
         <item name="colorOnPrimary">@color/white</item>
         <item name="colorOnSecondary">@color/white</item>
         <item name="colorPrimary">@color/nexora_red</item>
@@ -14,6 +15,23 @@
     <style name="Theme.PeerConnect" parent="Base.Theme.PeerConnect" />
     <style name="CircleImageView" parent="">
         <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+    <style name="Widget.Nexora.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
+        <item name="itemActiveIndicatorStyle">@style/Widget.Nexora.BottomNavigation.ActiveIndicator</item>
+        <item name="itemIconTint">@color/nav_item_color</item>
+        <item name="itemTextColor">@color/nav_item_color</item>
+        <item name="labelVisibilityMode">unlabeled</item>
+        <item name="backgroundTint">@color/nexora_surface</item>
+        <item name="elevation">0dp</item>
+    </style>
+    <style name="Widget.Nexora.BottomNavigation.ActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@color/nexora_green_soft</item>
+        <item name="android:width">64dp</item>
+        <item name="android:height">36dp</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.Nexora.Pill</item>
+    </style>
+    <style name="ShapeAppearance.Nexora.Pill" parent="ShapeAppearance.Material3.Corner.Full">
         <item name="cornerSize">50%</item>
     </style>
 </resources>

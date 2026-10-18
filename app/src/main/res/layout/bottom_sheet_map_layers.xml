@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_bottom_sheet_layers"
+    android:paddingHorizontal="20dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="24dp">
+
+    <!-- Top Drag Handle -->
+    <View
+        android:layout_width="36dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="14dp"
+        android:background="@drawable/bg_badge_pill"
+        android:alpha="0.4" />
+
+    <!-- Header Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Map details"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/nexora_text_primary" />
+
+        <ImageView
+            android:id="@+id/btnLayersClose"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="6dp"
+            android:src="@drawable/ic_close"
+            app:tint="@color/nexora_text_secondary"
+            android:contentDescription="Close map layers" />
+    </LinearLayout>
+
+    <!-- Map Type Section Title -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="MAP TYPE"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="@color/nexora_text_secondary"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Map Type Selection Cards -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <!-- Street Card -->
+        <LinearLayout
+            android:id="@+id/cardMapTypeStreet"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="10dp"
+            android:background="@drawable/bg_layer_card_selected"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/imgMapTypeStreet"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:src="@drawable/ic_map_style_street" />
+
+            <TextView
+                android:id="@+id/textMapTypeStreet"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Default"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#16A765" />
+        </LinearLayout>
+
+        <!-- Satellite Card -->
+        <LinearLayout
+            android:id="@+id/cardMapTypeSatellite"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="10dp"
+            android:background="@drawable/bg_layer_card_normal"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/imgMapTypeSatellite"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:src="@drawable/ic_map_style_satellite" />
+
+            <TextView
+                android:id="@+id/textMapTypeSatellite"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Satellite"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_secondary" />
+        </LinearLayout>
+
+        <!-- Hybrid Card -->
+        <LinearLayout
+            android:id="@+id/cardMapTypeHybrid"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="10dp"
+            android:background="@drawable/bg_layer_card_normal"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:id="@+id/imgMapTypeHybrid"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:src="@drawable/ic_map_style_hybrid" />
+
+            <TextView
+                android:id="@+id/textMapTypeHybrid"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Hybrid"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_secondary" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/nexora_border"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="14dp" />
+
+    <!-- Map Details Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="MAP DETAILS &amp; OVERLAYS"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="@color/nexora_text_secondary"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Active Peers Toggle -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="6dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Active Mesh Peers"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_primary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Show peer markers and mesh distances"
+                android:textSize="12sp"
+                android:textColor="@color/nexora_text_muted" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchLayerPeers"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:thumbTint="@color/nexora_green" />
+    </LinearLayout>
+
+    <!-- Emergency Alerts Toggle -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="6dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Emergency Alerts"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_primary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Show active SOS and emergency broadcasts"
+                android:textSize="12sp"
+                android:textColor="@color/nexora_text_muted" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchLayerAlerts"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:thumbTint="@color/nexora_green" />
+    </LinearLayout>
+
+    <!-- Emergency Facilities Toggle -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingVertical="6dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Emergency Facilities"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_primary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hospitals, Police, Fire, Shelters &amp; RPF"
+                android:textSize="12sp"
+                android:textColor="@color/nexora_text_muted" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchLayerPois"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:thumbTint="@color/nexora_green" />
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/nexora_border"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="14dp" />
+
+    <!-- Offline Map Cache & Pre-fetch Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Offline Tile Cache"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/nexora_text_primary" />
+
+            <TextView
+                android:id="@+id/textLayersCacheStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Pre-cached vector tiles ready"
+                android:textSize="11sp"
+                android:textColor="#16A765" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLayersPrefetch"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:text="Download Area"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/white"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_download"
+            app:iconTint="@color/white"
+            app:iconSize="14dp"
+            app:backgroundTint="#0284C7"
+            app:cornerRadius="10dp" />
+    </LinearLayout>
+
+</LinearLayout>

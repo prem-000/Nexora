@@ -38,6 +38,16 @@ object DistanceEngine {
         return EARTH_RADIUS_METERS * c
     }
 
+    /**
+     * Alias for calculateHaversineDistance for convenient distance queries.
+     */
+    fun calculateDistance(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double
+    ): Double = calculateHaversineDistance(lat1, lon1, lat2, lon2)
+
     const val ACCURACY_THRESHOLD_METERS = 25.0f
     const val PEER_STALE_TIMEOUT_MS = 10_000L
     const val DEFAULT_EMA_ALPHA = 0.3
